@@ -1,5 +1,5 @@
 import { cert, getApps, initializeApp, type ServiceAccount } from 'firebase-admin/app';
-import { getAuth } from 'firebase-admin/auth';
+import { getAuth, type DecodedIdToken } from 'firebase-admin/auth';
 
 export class RequestAuthError extends Error {
   constructor(
@@ -15,7 +15,7 @@ function getFirebaseAdminAuth() {
   const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
   if (!serviceAccountJson) {
     throw new RequestAuthError(
-      'Resume storage authentication is not configured. Set FIREBASE_SERVICE_ACCOUNT_JSON.',
+      'Firebase Admin authentication is not configured. Set FIREBASE_SERVICE_ACCOUNT_JSON.',
       503
     );
   }
@@ -46,17 +46,21 @@ function getFirebaseAdminAuth() {
   }
 }
 
-export async function verifyFirebaseBearerToken(authorization: string | undefined): Promise<string> {
+export async function verifyFirebaseBearerClaims(authorization: string | undefined): Promise<DecodedIdToken> {
   const match = authorization?.match(/^Bearer\s+(.+)$/i);
   if (!match) {
     throw new RequestAuthError('A valid Firebase sign-in is required to access resume storage.', 401);
   }
 
   try {
-    const decodedToken = await getFirebaseAdminAuth().verifyIdToken(match[1]);
-    return decodedToken.uid;
+    return await getFirebaseAdminAuth().verifyIdToken(match[1]);
   } catch (error) {
     if (error instanceof RequestAuthError) throw error;
     throw new RequestAuthError('The Firebase sign-in token is invalid or expired.', 401);
   }
+}
+
+export async function verifyFirebaseBearerToken(authorization: string | undefined): Promise<string> {
+  const decodedToken = await verifyFirebaseBearerClaims(authorization);
+  return decodedToken.uid;
 }

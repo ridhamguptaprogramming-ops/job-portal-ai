@@ -1,7 +1,12 @@
 import React, { useState } from 'react';
-import { X, Lock, Mail, User, ArrowRight } from 'lucide-react';
 import { UserProfile } from '../types/job';
 import { api } from '../services/api';
+import {
+  loginWithEmail,
+  registerWithEmail,
+  refreshCurrentFirebaseUser,
+  resendCurrentEmailVerification
+} from '../services/firebase';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -14,59 +19,84 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onClose,
   onAuthSuccess
 }) => {
-  if (!isOpen) return null;
-
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+  const [verificationPending, setVerificationPending] = useState(false);
+
+  if (!isOpen) return null;
+
+  const completeSignIn = async (firebaseUser: any, token: string) => {
+    if (!firebaseUser.emailVerified) {
+      setVerificationPending(true);
+      setSuccessMessage('Verify your email before continuing. Use the link sent to your inbox, then return here.');
+      return;
+    }
+    const response = await api.verifyFirebaseLogin(token);
+    onAuthSuccess(token, {
+      id: response.user.id,
+      email: response.user.email,
+      name: response.user.name,
+      isOnboarded: response.user.onboardingCompleted
+    });
+    onClose();
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setErrorMessage('');
+    setSuccessMessage('');
 
     try {
       if (mode === 'login') {
-        const res = await api.login(email, password);
-        onAuthSuccess(res.access_token || 'jwt_token', {
-          email,
-          name: res.user?.name || email.split('@')[0],
-          isOnboarded: true
-        });
+        const { user, token } = await loginWithEmail(email, password);
+        await completeSignIn(user, token);
       } else {
-        const res = await api.register(email, password, name);
-        onAuthSuccess(res.access_token || 'jwt_token', {
-          email,
-          name: name || email.split('@')[0],
-          isOnboarded: true
-        });
+        const { user, emailVerificationSent } = await registerWithEmail(email, password, name);
+        setVerificationPending(!user.emailVerified);
+        setSuccessMessage(
+          emailVerificationSent
+            ? `A verification link was sent to ${user.email}. Verify it before continuing.`
+            : `Your account was created, but the verification email could not be sent to ${user.email}. Retry below.`
+        );
       }
-      onClose();
     } catch (err: any) {
-      console.warn('API auth error, using standard credentials verification:', err);
-      // Fallback
-      onAuthSuccess('jwt_auth_' + Date.now(), {
-        email: email || 'candidate@openroles.example',
-        name: name || (email.split('@')[0] || 'Alex Morgan'),
-        isOnboarded: true
-      });
-      onClose();
+      setErrorMessage(err.message || 'Authentication could not be completed.');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleQuickDemo = () => {
-    onAuthSuccess('jwt_demo_alex', {
-      name: 'Alex Morgan',
-      email: 'alex.morgan@openroles.example',
-      headline: 'Software Engineer',
-      isOnboarded: true
-    });
-    onClose();
+  const confirmEmailVerification = async () => {
+    setIsLoading(true);
+    setErrorMessage('');
+    try {
+      const { user, token } = await refreshCurrentFirebaseUser();
+      setVerificationPending(false);
+      await completeSignIn(user, token);
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Could not verify your email yet.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const resendVerification = async () => {
+    setIsLoading(true);
+    setErrorMessage('');
+    try {
+      await resendCurrentEmailVerification();
+      setSuccessMessage(`A new verification link was sent to ${email.trim()}.`);
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Could not resend the verification email.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -134,10 +164,29 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             />
           </label>
 
-          {errorMessage && (
-            <p className="text-xs text-red-600 font-medium">{errorMessage}</p>
-          )}
+          {errorMessage && <p className="text-xs text-red-600 font-medium">{errorMessage}</p>}
+          {successMessage && <p className="text-xs text-emerald-700 font-medium">{successMessage}</p>}
 
+          {verificationPending && (
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => void confirmEmailVerification()}
+                disabled={isLoading}
+                className="w-full border border-[#E5E5E5] py-2.5 text-xs font-semibold disabled:opacity-50"
+              >
+                I have verified my email
+              </button>
+              <button
+                type="button"
+                onClick={() => void resendVerification()}
+                disabled={isLoading}
+                className="w-full border border-[#E5E5E5] py-2.5 text-xs font-semibold disabled:opacity-50"
+              >
+                Resend verification email
+              </button>
+            </div>
+          )}
           <button
             type="submit"
             disabled={isLoading}
@@ -157,13 +206,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             {mode === 'login' ? 'Create an account' : 'Already have an account? Sign in'}
           </button>
 
-          <button
-            type="button"
-            onClick={handleQuickDemo}
-            className="text-xs text-[#666666] hover:text-[#1F1F1F] underline underline-offset-2 cursor-pointer pt-1"
-          >
-            Explore as Verified Candidate (Alex Morgan)
-          </button>
         </div>
       </div>
     </div>

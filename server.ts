@@ -1,4 +1,4 @@
-import express, { Request, Response } from 'express';
+import express, { NextFunction, Request, Response } from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -6,7 +6,12 @@ import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import { INITIAL_VERIFIED_JOBS, VERIFIED_PROVIDERS } from './src/data/verifiedJobs';
 import { resolveCompany, VERIFIED_COMPANIES } from './src/services/companyLogoService';
-import { RequestAuthError, verifyFirebaseBearerToken } from './src/services/firebaseAdmin';
+import {
+  RequestAuthError,
+  verifyFirebaseBearerClaims,
+  verifyFirebaseBearerToken
+} from './src/services/firebaseAdmin';
+import type { DecodedIdToken } from 'firebase-admin/auth';
 import { getResumeAnalysesCollection } from './src/services/mongodb';
 
 dotenv.config();
@@ -82,81 +87,11 @@ const ai = apiKey ? new GoogleGenAI() : null;
 
 // ==================== REST API ROUTES ====================
 
-// Auth routes
-app.post('/api/auth/google', (req: Request, res: Response) => {
-  const { email, name, avatar, googleId } = req.body;
-  const userEmail = email || 'ridhamgupta805@gmail.com';
-  const userName = name || 'Ridham Gupta';
-  const token = 'jwt_google_' + Buffer.from(userEmail).toString('base64') + '_' + Date.now();
-  
-  res.json({
-    success: true,
-    token,
-    user: {
-      id: 'usr-google-' + (googleId || Date.now()),
-      name: userName,
-      email: userEmail,
-      headline: 'Software Engineer & Candidate',
-      avatarUrl: avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
-      authProvider: 'google',
-      isOnboarded: false
-    }
-  });
-});
-
-app.post('/api/auth/linkedin', (req: Request, res: Response) => {
-  const { email, name, avatar, linkedinId } = req.body;
-  const userEmail = email || 'ridhamgupta805@gmail.com';
-  const userName = name || 'Ridham Gupta';
-  const token = 'jwt_linkedin_' + Buffer.from(userEmail).toString('base64') + '_' + Date.now();
-  
-  res.json({
-    success: true,
-    token,
-    user: {
-      id: 'usr-linkedin-' + (linkedinId || Date.now()),
-      name: userName,
-      email: userEmail,
-      headline: 'Software Engineer',
-      avatarUrl: avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
-      authProvider: 'linkedin',
-      isOnboarded: false
-    }
-  });
-});
-
-app.post('/api/auth/register', (req: Request, res: Response) => {
-  const { name, email } = req.body;
-  const token = 'jwt_token_' + Buffer.from(email || 'user').toString('base64') + '_' + Date.now();
-  res.json({
-    success: true,
-    token,
-    user: {
-      id: 'usr-' + Date.now(),
-      name: name || 'Job Seeker',
-      email: email || 'ridhamgupta805@gmail.com',
-      headline: 'Candidate',
-      isOnboarded: false
-    }
-  });
-});
-
-app.post('/api/auth/login', (req: Request, res: Response) => {
-  const { email } = req.body;
-  const userEmail = email || 'ridhamgupta805@gmail.com';
-  const token = 'jwt_token_' + Buffer.from(userEmail).toString('base64') + '_' + Date.now();
-  res.json({
-    success: true,
-    token,
-    user: {
-      id: 'usr-' + Date.now(),
-      name: userEmail.split('@')[0],
-      email: userEmail,
-      headline: 'Software Engineer',
-      isOnboarded: false
-    }
-  });
-});
+app.all(
+  ['/api/auth/google', '/api/auth/linkedin', '/api/auth/register', '/api/auth/login'],
+  (_req: Request, res: Response) =>
+    res.status(410).json({ error: 'Use Firebase Authentication for sign-in and registration.' })
+);
 
 // Real GitHub API Integration
 app.post('/api/integrations/fetch-github', async (req: Request, res: Response) => {
@@ -823,6 +758,53 @@ interface UserRecord {
   lastLoginAt: string;
 }
 
+interface AuthenticatedRequest extends Request {
+  firebaseClaims?: DecodedIdToken;
+}
+
+function requireFirebaseAuth(req: Request, res: Response, next: NextFunction) {
+  void verifyFirebaseBearerClaims(req.headers.authorization)
+    .then((claims) => {
+      if (!claims.email_verified) {
+        return res.status(403).json({ error: 'Verify your email address before continuing.' });
+      }
+      (req as AuthenticatedRequest).firebaseClaims = claims;
+      next();
+    })
+    .catch((error: unknown) => {
+      if (error instanceof RequestAuthError) {
+        res.status(error.statusCode).json({ error: error.message });
+        return;
+      }
+      next(error);
+    });
+}
+
+function getVerifiedClaims(req: Request): DecodedIdToken {
+  const claims = (req as AuthenticatedRequest).firebaseClaims;
+  if (!claims) throw new Error('Firebase authentication middleware did not attach verified claims.');
+  return claims;
+}
+
+function userFromVerifiedClaims(claims: DecodedIdToken): UserRecord {
+  const email = claims.email || '';
+  const name = claims.name || email.split('@')[0] || 'Candidate';
+  return {
+    id: claims.uid,
+    firebaseUid: claims.uid,
+    email,
+    emailVerified: claims.email_verified === true,
+    name,
+    displayName: name,
+    photoUrl: claims.picture,
+    headline: 'Candidate on openroles',
+    location: '',
+    onboardingCompleted: false,
+    termsAccepted: false,
+    lastLoginAt: new Date().toISOString()
+  };
+}
+
 const usersStore: Map<string, UserRecord> = new Map();
 const connectedAccountsStore: Map<string, any[]> = new Map();
 const consentsStore: any[] = [];
@@ -909,8 +891,21 @@ function parseFirebaseToken(authHeader?: string): { uid: string; email: string; 
   };
 }
 
-// Section 7, 8, 33: Firebase Login Verification & User Sync
-app.post('/api/auth/firebase-verify', (req: Request, res: Response) => {
+// Firebase identity and onboarding are owned by the PostgreSQL-backed FastAPI service.
+app.all(
+  [
+    '/api/auth/firebase-verify',
+    '/api/auth/me',
+    '/api/auth/logout',
+    '/api/onboarding/complete',
+    '/api/onboarding/legal-documents'
+  ],
+  (_req: Request, res: Response) =>
+    res.status(410).json({ error: 'This endpoint is managed by the FastAPI authentication service.' })
+);
+
+// Legacy handlers remain unreachable; retain Firebase verification on any future reactivation.
+app.post('/api/auth/firebase-verify', requireFirebaseAuth, (req: Request, res: Response) => {
   const { id_token, name: inputName } = req.body;
   if (!id_token) {
     return res.status(400).json({ error: 'Missing id_token parameter' });
@@ -961,11 +956,11 @@ app.post('/api/auth/firebase-verify', (req: Request, res: Response) => {
 });
 
 // Auth me endpoint with Firebase token verification
-app.get('/api/auth/me', (req: Request, res: Response) => {
+app.get('/api/auth/me', requireFirebaseAuth, (req: Request, res: Response) => {
   const claims = parseFirebaseToken(req.headers.authorization);
   let user = usersStore.get(claims.uid);
   if (!user) {
-    user = defaultUser;
+    user = userFromVerifiedClaims(getVerifiedClaims(req));
   }
   const conns = connectedAccountsStore.get(user.id) || [];
   const step = user.onboardingCompleted ? 'completed' : (conns.length > 0 ? 'terms' : 'accounts');
@@ -998,14 +993,14 @@ app.get('/api/onboarding/legal-documents', (_req: Request, res: Response) => {
 });
 
 // Section 27: Onboarding Complete Endpoint
-app.post('/api/onboarding/complete', (req: Request, res: Response) => {
+app.post('/api/onboarding/complete', requireFirebaseAuth, (req: Request, res: Response) => {
   const { terms_agreed, terms_version, privacy_agreed, privacy_version } = req.body;
   if (!terms_agreed || !privacy_agreed) {
     return res.status(400).json({ error: 'Explicit agreement to Terms and Privacy Policy is required.' });
   }
 
   const claims = parseFirebaseToken(req.headers.authorization);
-  let user = usersStore.get(claims.uid) || defaultUser;
+  let user = usersStore.get(claims.uid) || userFromVerifiedClaims(getVerifiedClaims(req));
 
   // Record immutable consent (Section 25)
   consentsStore.push({
@@ -1033,20 +1028,19 @@ app.post('/api/onboarding/complete', (req: Request, res: Response) => {
 });
 
 // Section 21: Integrations Status Endpoint
-app.get('/api/integrations/status', (req: Request, res: Response) => {
-  const claims = parseFirebaseToken(req.headers.authorization);
-  const user = usersStore.get(claims.uid) || defaultUser;
-  const conns = connectedAccountsStore.get(user.id) || [];
+app.get('/api/integrations/status', requireFirebaseAuth, (req: Request, res: Response) => {
+  const claims = getVerifiedClaims(req);
+  const conns = connectedAccountsStore.get(claims.uid) || [];
   res.json({ connectedAccounts: conns });
 });
 
 // Section 14, 15, 16: GitHub Connection Endpoint
-app.post('/api/integrations/github/connect', async (req: Request, res: Response) => {
+app.post('/api/integrations/github/connect', requireFirebaseAuth, async (req: Request, res: Response) => {
   const { username } = req.body;
   if (!username) return res.status(400).json({ error: 'Username required' });
 
   const claims = parseFirebaseToken(req.headers.authorization);
-  const user = usersStore.get(claims.uid) || defaultUser;
+  const user = usersStore.get(claims.uid) || userFromVerifiedClaims(getVerifiedClaims(req));
 
   // Query real GitHub public API
   let profileData: any = {
@@ -1096,18 +1090,18 @@ app.post('/api/integrations/github/connect', async (req: Request, res: Response)
   res.json({ success: true, connectedAccount: account });
 });
 
-app.post('/api/integrations/github/disconnect', (req: Request, res: Response) => {
+app.post('/api/integrations/github/disconnect', requireFirebaseAuth, (req: Request, res: Response) => {
   const claims = parseFirebaseToken(req.headers.authorization);
-  const user = usersStore.get(claims.uid) || defaultUser;
+  const user = usersStore.get(claims.uid) || userFromVerifiedClaims(getVerifiedClaims(req));
   const conns = connectedAccountsStore.get(user.id) || [];
   connectedAccountsStore.set(user.id, conns.filter(c => c.provider !== 'github'));
   res.json({ success: true, message: 'GitHub account disconnected.' });
 });
 
 // Section 11, 12, 13: LinkedIn Connection Endpoint
-app.post('/api/integrations/linkedin/connect', (req: Request, res: Response) => {
+app.post('/api/integrations/linkedin/connect', requireFirebaseAuth, (req: Request, res: Response) => {
   const claims = parseFirebaseToken(req.headers.authorization);
-  const user = usersStore.get(claims.uid) || defaultUser;
+  const user = usersStore.get(claims.uid) || userFromVerifiedClaims(getVerifiedClaims(req));
 
   const account = {
     id: 'conn-li-' + Date.now(),
@@ -1132,9 +1126,9 @@ app.post('/api/integrations/linkedin/connect', (req: Request, res: Response) => 
   res.json({ success: true, connectedAccount: account });
 });
 
-app.post('/api/integrations/linkedin/disconnect', (req: Request, res: Response) => {
+app.post('/api/integrations/linkedin/disconnect', requireFirebaseAuth, (req: Request, res: Response) => {
   const claims = parseFirebaseToken(req.headers.authorization);
-  const user = usersStore.get(claims.uid) || defaultUser;
+  const user = usersStore.get(claims.uid) || userFromVerifiedClaims(getVerifiedClaims(req));
   const conns = connectedAccountsStore.get(user.id) || [];
   connectedAccountsStore.set(user.id, conns.filter(c => c.provider !== 'linkedin'));
   res.json({ success: true, message: 'LinkedIn account disconnected.' });

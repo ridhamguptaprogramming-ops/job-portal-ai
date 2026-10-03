@@ -12,6 +12,7 @@ import { resolveCompany } from './companyLogoService';
 
 export const PRIMARY_RENDER_BACKEND = 'https://job-portal-fastapi.onrender.com';
 export const LOCAL_SERVER_BACKEND = '';
+const AUTH_API_URL = import.meta.env.VITE_AUTH_API_URL || PRIMARY_RENDER_BACKEND;
 
 export interface ApiJobResponse {
   jobs: Job[];
@@ -157,7 +158,8 @@ class ApiService {
 
   constructor() {
     if (typeof window !== 'undefined') {
-      this.token = localStorage.getItem('openroles_token') || localStorage.getItem('careermatch_token');
+      localStorage.removeItem('openroles_token');
+      localStorage.removeItem('careermatch_token');
       this.customBaseUrl = localStorage.getItem('openroles_api_url');
     }
   }
@@ -184,13 +186,6 @@ class ApiService {
 
   public setToken(token: string | null) {
     this.token = token;
-    if (typeof window !== 'undefined') {
-      if (token) {
-        localStorage.setItem('openroles_token', token);
-      } else {
-        localStorage.removeItem('openroles_token');
-      }
-    }
   }
 
   public getToken(): string | null {
@@ -240,8 +235,12 @@ class ApiService {
   /**
    * Core request wrapper
    */
-  private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
-    const baseUrl = this.getBaseUrl();
+  private async request<T>(
+    path: string,
+    options: RequestInit = {},
+    baseUrlOverride?: string
+  ): Promise<T> {
+    const baseUrl = baseUrlOverride ?? this.getBaseUrl();
     const url = `${baseUrl}${path.startsWith('/') ? path : `/${path}`}`;
     const headers = new Headers(options.headers || {});
     headers.set('Accept', 'application/json');
@@ -363,31 +362,9 @@ class ApiService {
     });
   }
 
-  public async login(email: string, password?: string): Promise<any> {
-    const res = await this.request<any>('/api/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ email, password }),
-    });
-    if (res.access_token) {
-      this.setToken(res.access_token);
-    }
-    return res;
-  }
-
-  public async register(email: string, password: string, name?: string): Promise<any> {
-    const res = await this.request<any>('/api/auth/register', {
-      method: 'POST',
-      body: JSON.stringify({ email, password, name }),
-    });
-    if (res.access_token) {
-      this.setToken(res.access_token);
-    }
-    return res;
-  }
-
   public async logout(): Promise<void> {
     try {
-      await this.request('/api/auth/logout', { method: 'POST' });
+      await this.request('/api/auth/logout', { method: 'POST' }, AUTH_API_URL);
     } catch {
       // ignore
     }
@@ -395,7 +372,7 @@ class ApiService {
   }
 
   public async getCurrentUser(): Promise<any> {
-    return this.request<any>('/api/auth/me');
+    return this.request<any>('/api/auth/me', {}, AUTH_API_URL);
   }
 
   /**
@@ -406,7 +383,7 @@ class ApiService {
     const res = await this.request<any>('/api/auth/firebase-verify', {
       method: 'POST',
       body: JSON.stringify({ id_token: idToken, name }),
-    });
+    }, AUTH_API_URL);
     return res;
   }
 
@@ -443,11 +420,11 @@ class ApiService {
         privacy_agreed: privacyAgreed,
         privacy_version: privacyVersion,
       }),
-    });
+    }, AUTH_API_URL);
   }
 
   public async getLegalDocuments(): Promise<any> {
-    return this.request<any>('/api/onboarding/legal-documents');
+    return this.request<any>('/api/onboarding/legal-documents', {}, AUTH_API_URL);
   }
 
   public async getIntegrationsStatus(): Promise<any> {
@@ -511,8 +488,6 @@ if (typeof window !== 'undefined') {
     fetchSavedJobs: () => api.getSavedJobs(),
     saveJob: (id: string) => api.saveJob(id),
     removeSavedJob: (id: string) => api.unsaveJob(id),
-    login: (e: string, p: string) => api.login(e, p),
-    register: (e: string, p: string) => api.register(e, p),
     logout: () => api.logout(),
     fetchCurrentUser: () => api.getCurrentUser(),
     fetchRecommendations: () => api.getRecommendedJobs(),

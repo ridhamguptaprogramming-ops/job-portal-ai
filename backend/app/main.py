@@ -7,6 +7,11 @@ from pydantic import BaseModel
 
 from .core.config import settings
 from .services.firebase_auth import verify_firebase_id_token, get_current_firebase_user
+from .services.user_repository import (
+    complete_user_onboarding,
+    get_or_create_firebase_user,
+    get_user_by_firebase_uid,
+)
 from .services.company_logo_service import CompanyLogoService, VERIFIED_ENTERPRISE_COMPANIES
 from .integrations.job_portals import JobPortalGatewayRegistry
 from .integrations.github import GitHubIntegrationService
@@ -524,46 +529,7 @@ def unsave_job(job_id: str):
 
 # ================= PRODUCTION AUTHENTICATION & ONBOARDING =================
 
-# User store in memory / PostgreSQL abstraction (Section 9, 30, 33)
-USERS_DB: Dict[str, Dict[str, Any]] = {
-    "usr-alex-morgan": {
-        "id": "usr-alex-morgan",
-        "firebase_uid": "fb-alex-morgan-prod",
-        "email": "candidate@openroles.example",
-        "email_verified": True,
-        "name": "Alex Morgan",
-        "display_name": "Alex Morgan",
-        "photo_url": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100",
-        "headline": "Software Engineer & Backend Developer",
-        "location": "Bengaluru, India",
-        "onboarding_completed": True,
-        "terms_accepted": True,
-        "terms_version": "2026-10-01",
-        "terms_accepted_at": datetime.utcnow().isoformat(),
-        "created_at": datetime.utcnow().isoformat(),
-        "last_login_at": datetime.utcnow().isoformat()
-    }
-}
-
-CONNECTED_ACCOUNTS_DB: Dict[str, List[Dict[str, Any]]] = {
-    "usr-alex-morgan": [
-        {
-            "id": "conn-gh-1",
-            "provider": "github",
-            "provider_username": "ridhamgupta805",
-            "status": "connected",
-            "connected_at": datetime.utcnow().isoformat(),
-            "last_synced_at": datetime.utcnow().isoformat(),
-            "summary": {
-                "repos_count": 18,
-                "top_skills": ["Python", "FastAPI", "PostgreSQL", "Docker", "TypeScript"],
-                "bio": "Software engineer building scalable backend architectures."
-            }
-        }
-    ]
-}
-
-USER_CONSENTS_DB: List[Dict[str, Any]] = []
+CONNECTED_ACCOUNTS_DB: Dict[str, List[Dict[str, Any]]] = {}
 
 @app.post("/api/auth/firebase-verify")
 async def verify_firebase_login(payload: FirebaseVerifyPayload, request: Request):
@@ -574,56 +540,30 @@ async def verify_firebase_login(payload: FirebaseVerifyPayload, request: Request
     """
     token_claims = await verify_firebase_id_token(payload.id_token)
     uid = token_claims["uid"]
-    email = token_claims.get("email") or f"{uid}@openroles.user"
-    name = payload.name or token_claims.get("display_name") or email.split("@")[0].capitalize()
-
-    # Look up user by firebase_uid
-    user = next((u for u in USERS_DB.values() if u.get("firebase_uid") == uid), None)
-    if not user:
-        # Check by email for provider linking
-        user = next((u for u in USERS_DB.values() if u.get("email") == email), None)
-
-    if not user:
-        user_id = f"usr-{uuid.uuid4().hex[:8]}"
-        user = {
-            "id": user_id,
-            "firebase_uid": uid,
-            "email": email,
-            "email_verified": token_claims.get("email_verified", False),
-            "name": name,
-            "display_name": name,
-            "photo_url": token_claims.get("photo_url", ""),
-            "headline": "Candidate on openroles",
-            "location": "Bengaluru, India",
-            "onboarding_completed": False,
-            "terms_accepted": False,
-            "terms_version": None,
-            "terms_accepted_at": None,
-            "created_at": datetime.utcnow().isoformat(),
-            "last_login_at": datetime.utcnow().isoformat()
-        }
-        USERS_DB[user_id] = user
-        CONNECTED_ACCOUNTS_DB[user_id] = []
-    else:
-        user["firebase_uid"] = uid
-        user["last_login_at"] = datetime.utcnow().isoformat()
-        if payload.name:
-            user["name"] = payload.name
-
-    user_id = user["id"]
-    conns = CONNECTED_ACCOUNTS_DB.get(user_id, [])
-
-    # Calculate current onboarding step (Section 28, 29)
-    step = "completed" if user.get("onboarding_completed") else ("terms" if len(conns) > 0 else "accounts")
+    user = get_or_create_firebase_user(token_claims)
+    conns = CONNECTED_ACCOUNTS_DB.setdefault(user["id"], [])
+    step = "completed" if user["onboarding_completed"] else ("terms" if conns else "accounts")
 
     return {
         "status": "ok",
         "user": {
-            **user,
-            "onboarding_step": step
+            "id": user["id"],
+            "firebaseUid": user["firebase_uid"],
+            "email": user["email"],
+            "emailVerified": user["email_verified"],
+            "name": user["name"],
+            "displayName": user["display_name"],
+            "photoUrl": user["photo_url"],
+            "headline": user["headline"],
+            "location": user["location"],
+            "onboardingCompleted": user["onboarding_completed"],
+            "termsAccepted": user["terms_accepted"],
+            "termsVersion": user["terms_version"],
+            "termsAcceptedAt": user["terms_accepted_at"],
+            "onboardingStep": step,
         },
         "connected_accounts": conns,
-        "token": payload.id_token
+        "connectedAccounts": conns,
     }
 
 @app.get("/api/auth/me")
@@ -633,37 +573,29 @@ async def get_me(current_claims: Dict[str, Any] = Depends(get_current_firebase_u
     Extracts verified UID and returns current user from PostgreSQL.
     """
     uid = current_claims["uid"]
-    user = next((u for u in USERS_DB.values() if u.get("firebase_uid") == uid), None)
+    user = get_user_by_firebase_uid(uid)
     if not user:
-        # Auto-provision on first request
-        email = current_claims.get("email", "candidate@openroles.example")
-        user = {
-            "id": f"usr-{uuid.uuid4().hex[:8]}",
-            "firebase_uid": uid,
-            "email": email,
-            "email_verified": current_claims.get("email_verified", False),
-            "name": current_claims.get("display_name") or email.split("@")[0].capitalize(),
-            "display_name": current_claims.get("display_name") or email.split("@")[0].capitalize(),
-            "photo_url": current_claims.get("photo_url", ""),
-            "headline": "Candidate on openroles",
-            "location": "Bengaluru, India",
-            "onboarding_completed": False,
-            "terms_accepted": False,
-            "terms_version": None,
-            "terms_accepted_at": None,
-            "created_at": datetime.utcnow().isoformat(),
-            "last_login_at": datetime.utcnow().isoformat()
-        }
-        USERS_DB[user["id"]] = user
-        CONNECTED_ACCOUNTS_DB[user["id"]] = []
+        raise HTTPException(status_code=404, detail="User account not found. Complete Firebase sign-in first.")
 
-    conns = CONNECTED_ACCOUNTS_DB.get(user["id"], [])
-    step = "completed" if user.get("onboarding_completed") else ("terms" if len(conns) > 0 else "accounts")
+    conns = CONNECTED_ACCOUNTS_DB.setdefault(user["id"], [])
+    step = "completed" if user["onboarding_completed"] else ("terms" if conns else "accounts")
 
     return {
-        **user,
-        "onboarding_step": step,
-        "connected_accounts": conns
+        "id": user["id"],
+        "firebaseUid": user["firebase_uid"],
+        "email": user["email"],
+        "emailVerified": user["email_verified"],
+        "name": user["name"],
+        "displayName": user["display_name"],
+        "photoUrl": user["photo_url"],
+        "headline": user["headline"],
+        "location": user["location"],
+        "onboardingCompleted": user["onboarding_completed"],
+        "termsAccepted": user["terms_accepted"],
+        "termsVersion": user["terms_version"],
+        "termsAcceptedAt": user["terms_accepted_at"],
+        "onboardingStep": step,
+        "connectedAccounts": conns,
     }
 
 @app.post("/api/auth/logout")
@@ -704,33 +636,36 @@ async def complete_onboarding(
             detail="Explicit agreement to both Terms and Privacy Policy is required."
         )
 
-    uid = current_claims["uid"]
-    user = next((u for u in USERS_DB.values() if u.get("firebase_uid") == uid), None)
-    if not user:
-        raise HTTPException(status_code=404, detail="User account not found.")
+    active_terms_version = "2026-10-01"
+    active_privacy_version = "2026-10-01"
+    if payload.terms_version != active_terms_version or payload.privacy_version != active_privacy_version:
+        raise HTTPException(status_code=409, detail="The legal documents have changed. Reload and review the current versions.")
 
-    # Record immutable consent (Section 25)
-    consent_record = {
-        "id": f"consent-{uuid.uuid4().hex[:8]}",
-        "user_id": user["id"],
-        "terms_version": payload.terms_version,
-        "privacy_version": payload.privacy_version,
-        "accepted_at": datetime.utcnow().isoformat(),
-        "ip_address": request.client.host if request.client else "127.0.0.1",
-        "user_agent": request.headers.get("user-agent", "Browser")
-    }
-    USER_CONSENTS_DB.append(consent_record)
-
-    # Mark onboarding complete
-    user["terms_accepted"] = True
-    user["terms_version"] = payload.terms_version
-    user["terms_accepted_at"] = datetime.utcnow().isoformat()
-    user["onboarding_completed"] = True
+    user = complete_user_onboarding(
+        current_claims["uid"],
+        payload.terms_version,
+        payload.privacy_version,
+        request.client.host if request.client else None,
+        request.headers.get("user-agent"),
+    )
 
     return {
         "status": "ok",
         "message": "Onboarding completed successfully. Welcome to openroles!",
-        "user": user
+        "user": {
+            "id": user["id"],
+            "firebaseUid": user["firebase_uid"],
+            "email": user["email"],
+            "emailVerified": user["email_verified"],
+            "name": user["name"],
+            "displayName": user["display_name"],
+            "photoUrl": user["photo_url"],
+            "onboardingCompleted": user["onboarding_completed"],
+            "termsAccepted": user["terms_accepted"],
+            "termsVersion": user["terms_version"],
+            "termsAcceptedAt": user["terms_accepted_at"],
+            "onboardingStep": "completed",
+        }
     }
 
 # ================= INTEGRATIONS & CONNECTED ACCOUNTS =================
@@ -739,8 +674,10 @@ async def complete_onboarding(
 async def get_integrations_status(current_claims: Dict[str, Any] = Depends(get_current_firebase_user)):
     """Section 21: Returns connection status for LinkedIn, GitHub, and job portals."""
     uid = current_claims["uid"]
-    user = next((u for u in USERS_DB.values() if u.get("firebase_uid") == uid), None)
-    user_id = user["id"] if user else "usr-default"
+    user = get_user_by_firebase_uid(uid)
+    if not user:
+        raise HTTPException(status_code=404, detail="User account not found.")
+    user_id = user["id"]
     conns = CONNECTED_ACCOUNTS_DB.get(user_id, [])
     return {"connected_accounts": conns}
 
@@ -751,7 +688,7 @@ async def connect_github(
 ):
     """Section 14, 15, 16: Connects GitHub and imports verified public profile & repositories."""
     uid = current_claims["uid"]
-    user = next((u for u in USERS_DB.values() if u.get("firebase_uid") == uid), None)
+    user = get_user_by_firebase_uid(uid)
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
 
@@ -820,10 +757,11 @@ async def connect_github(
 async def disconnect_github(current_claims: Dict[str, Any] = Depends(get_current_firebase_user)):
     """Section 41: Disconnects GitHub account cleanly without wiping core user profile."""
     uid = current_claims["uid"]
-    user = next((u for u in USERS_DB.values() if u.get("firebase_uid") == uid), None)
-    if user:
-        conns = CONNECTED_ACCOUNTS_DB.get(user["id"], [])
-        CONNECTED_ACCOUNTS_DB[user["id"]] = [c for c in conns if c["provider"] != "github"]
+    user = get_user_by_firebase_uid(uid)
+    if not user:
+        raise HTTPException(status_code=404, detail="User account not found.")
+    conns = CONNECTED_ACCOUNTS_DB.get(user["id"], [])
+    CONNECTED_ACCOUNTS_DB[user["id"]] = [c for c in conns if c["provider"] != "github"]
     return {"success": True, "message": "GitHub disconnected."}
 
 @app.post("/api/integrations/linkedin/connect")
@@ -833,7 +771,7 @@ async def connect_linkedin(
 ):
     """Section 11, 12, 13: Official LinkedIn integration & connection handler."""
     uid = current_claims["uid"]
-    user = next((u for u in USERS_DB.values() if u.get("firebase_uid") == uid), None)
+    user = get_user_by_firebase_uid(uid)
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
 
@@ -871,10 +809,11 @@ async def connect_linkedin(
 async def disconnect_linkedin(current_claims: Dict[str, Any] = Depends(get_current_firebase_user)):
     """Section 41: Disconnects LinkedIn account cleanly."""
     uid = current_claims["uid"]
-    user = next((u for u in USERS_DB.values() if u.get("firebase_uid") == uid), None)
-    if user:
-        conns = CONNECTED_ACCOUNTS_DB.get(user["id"], [])
-        CONNECTED_ACCOUNTS_DB[user["id"]] = [c for c in conns if c["provider"] != "linkedin"]
+    user = get_user_by_firebase_uid(uid)
+    if not user:
+        raise HTTPException(status_code=404, detail="User account not found.")
+    conns = CONNECTED_ACCOUNTS_DB.get(user["id"], [])
+    CONNECTED_ACCOUNTS_DB[user["id"]] = [c for c in conns if c["provider"] != "linkedin"]
     return {"success": True, "message": "LinkedIn disconnected."}
 
 @app.get("/api/integrations/job-portals")

@@ -7,8 +7,6 @@ import {
   ShieldCheck,
   AlertCircle,
   CheckCircle2,
-  Sparkles,
-  Info
 } from 'lucide-react';
 import {
   signInWithGoogle,
@@ -19,12 +17,14 @@ import {
   completeEmailLinkSignIn,
   emailForSignInStorageKey,
   sendPasswordReset,
-  getFirebaseErrorMessage
+  refreshCurrentFirebaseUser,
+  resendCurrentEmailVerification,
+  FirebaseAuthFlowError
 } from '../services/firebase';
 
 interface AuthScreenProps {
   initialMode?: 'signup' | 'signin';
-  onAuthSuccess: (firebaseUser: any, token: string) => void;
+  onAuthSuccess: (firebaseUser: any, token: string) => Promise<void>;
   onCancel?: () => void;
 }
 
@@ -41,6 +41,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [isEmailLinkSending, setIsEmailLinkSending] = useState(false);
   const [isEmailLinkPending, setIsEmailLinkPending] = useState(false);
+  const [isEmailVerificationPending, setIsEmailVerificationPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
   const [forgotPasswordOpen, setForgotPasswordOpen] = useState(false);
@@ -56,7 +57,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     setIsLoading(true);
     try {
       const { user, token } = await completeEmailLinkSignIn(emailForLink);
-      onAuthSuccess(user, token);
+      await onAuthSuccess(user, token);
     } catch (err: any) {
       setError(err.message || 'Could not complete email-link sign-in.');
       setIsEmailLinkPending(true);
@@ -114,9 +115,16 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
     try {
       const { user, token } = await signInWithGoogle();
-      onAuthSuccess(user, token);
+      await onAuthSuccess(user, token);
     } catch (err: any) {
       setError(err.message || 'Google sign-in could not be completed.');
+      if (err.code === 'auth/account-exists-with-different-credential') {
+        setMode('signin');
+        if (err.email) setEmail(err.email);
+        setSuccessNotice(
+          'An account already exists for this email. Sign in using your existing method; Google will be linked to that Firebase account.'
+        );
+      }
     } finally {
       setIsGoogleLoading(false);
     }
@@ -147,18 +155,54 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
           password,
           name.trim() || undefined
         );
-        if (emailVerificationSent) {
+        if (!user.emailVerified) {
+          setIsEmailVerificationPending(true);
           setSuccessNotice(
-            `Verification email dispatched to ${user.email}. You may proceed with account onboarding.`
+            emailVerificationSent
+              ? `A verification link was sent to ${user.email}. Verify your email before continuing to onboarding.`
+              : `Your account was created, but the verification email could not be sent to ${user.email}. Retry sending it below before continuing.`
           );
+          return;
         }
-        onAuthSuccess(user, token);
+        await onAuthSuccess(user, token);
       } else {
         const { user, token } = await loginWithEmail(email, password);
-        onAuthSuccess(user, token);
+        await onAuthSuccess(user, token);
       }
     } catch (err: any) {
       setError(err.message || 'Authentication failed. Please check your credentials.');
+      if (err.code === 'auth/email-already-in-use') {
+        setMode('signin');
+        setEmail(email.trim());
+        setSuccessNotice('An account already exists with this email. Sign in instead; no duplicate account was created.');
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleConfirmEmailVerification = async () => {
+    setError(null);
+    setIsLoading(true);
+    try {
+      const { user, token } = await refreshCurrentFirebaseUser();
+      setIsEmailVerificationPending(false);
+      await onAuthSuccess(user, token);
+    } catch (err: any) {
+      setError(err.message || 'Could not verify your email yet.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleResendVerification = async () => {
+    setError(null);
+    setIsLoading(true);
+    try {
+      await resendCurrentEmailVerification();
+      setSuccessNotice(`A new verification link was sent to ${email.trim()}.`);
+    } catch (err: any) {
+      setError(err.message || 'Could not resend the verification email.');
     } finally {
       setIsLoading(false);
     }
@@ -219,6 +263,27 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
             <div className="p-3 bg-[#FFF4CC]/50 border border-[#F4C430] text-xs text-[#745800] flex items-start gap-2.5">
               <CheckCircle2 className="w-4 h-4 text-[#B18A08] flex-shrink-0 mt-0.5" />
               <div className="flex-1 leading-relaxed">{successNotice}</div>
+            </div>
+          )}
+
+          {isEmailVerificationPending && (
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => void handleConfirmEmailVerification()}
+                disabled={isLoading}
+                className="w-full py-2.5 bg-[#F4C430] hover:bg-[#e0b224] text-[#1F1F1F] text-xs font-bold disabled:opacity-50"
+              >
+                {isLoading ? 'Checking verification...' : 'I have verified my email'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleResendVerification()}
+                disabled={isLoading}
+                className="w-full py-2.5 border border-[#E5E5E5] bg-white text-[#1F1F1F] text-xs font-semibold disabled:opacity-50"
+              >
+                Resend verification email
+              </button>
             </div>
           )}
 
@@ -302,24 +367,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               </span>
             </button>
 
-            <button
-              type="button"
-              onClick={() => {
-                onAuthSuccess(
-                  {
-                    uid: 'fb-alex-morgan-prod',
-                    email: 'alex.morgan@openroles.example',
-                    displayName: 'Alex Morgan',
-                    photoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'
-                  },
-                  'demo-firebase-token-alex-morgan'
-                );
-              }}
-              className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-slate-50 hover:bg-slate-100 border border-dashed border-[#D1D5DB] text-xs font-medium text-[#4B5563] transition-colors cursor-pointer"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-[#B18A08]" />
-              <span>One-Click Candidate Sign-In (Alex Morgan)</span>
-            </button>
           </div>
 
           {/* Section 2 Divider: ---------------- OR ---------------- */}

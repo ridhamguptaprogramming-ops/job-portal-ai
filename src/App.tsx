@@ -48,51 +48,11 @@ export default function App() {
   const [currentView, setCurrentView] = useState<string>('home');
 
   // Authenticated User State
-  const [user, setUser] = useState<UserProfile | null>(() => {
-    const saved = localStorage.getItem('openroles_user') || localStorage.getItem('careermatch_user');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {
-        // ignore
-      }
-    }
-    return {
-      id: 'usr-alex-morgan',
-      name: 'Alex Morgan',
-      email: 'candidate@openroles.example',
-      headline: 'Software Engineer & Backend Developer',
-      location: 'Bengaluru, India',
-      about: 'Passionate software engineer building resilient backend microservices with Python, FastAPI, and PostgreSQL.',
-      careerPreferences: {
-        targetTitles: ['Software Engineer', 'Backend Developer'],
-        preferredLocations: ['Bengaluru, India', 'Remote — India'],
-        remotePreference: 'remote',
-        minSalary: 2000000,
-        currency: 'INR'
-      },
-      isOnboarded: true
-    };
-  });
+  const [user, setUser] = useState<UserProfile | null>(null);
 
   // Onboarding & Account Connections State (Sections 1, 10, 23, 28, 29)
   const [onboardingStep, setOnboardingStep] = useState<OnboardingStep>('accounts');
-  const [connectedAccounts, setConnectedAccounts] = useState<ConnectedAccount[]>([
-    {
-      id: 'conn-gh-1',
-      provider: 'github',
-      providerUsername: 'ridhamgupta805',
-      status: 'connected',
-      connectedAt: '2026-10-02T10:00:00Z',
-      lastSyncedAt: '2026-10-03T02:00:00Z',
-      summary: {
-        name: 'Ridham Gupta',
-        reposCount: 18,
-        topSkills: ['Python', 'FastAPI', 'PostgreSQL', 'Docker', 'TypeScript'],
-        bio: 'Software engineer candidate on openroles'
-      }
-    }
-  ]);
+  const [connectedAccounts, setConnectedAccounts] = useState<ConnectedAccount[]>([]);
   const [authScreenOpen, setAuthScreenOpen] = useState(false);
   const [authMode, setAuthMode] = useState<'signup' | 'signin'>('signup');
 
@@ -107,11 +67,12 @@ export default function App() {
   useEffect(() => {
     const unsubscribe = onAuthStateSubscription(async (firebaseUser) => {
       if (firebaseUser) {
+        if (!firebaseUser.emailVerified) return;
         try {
           const token = await firebaseUser.getIdToken();
           const res = await api.verifyFirebaseLogin(token, firebaseUser.displayName || undefined);
           if (res && res.user) {
-            const isComplete = Boolean(res.user.onboardingCompleted);
+            const isComplete = Boolean(res.user.onboardingCompleted ?? res.user.onboarding_completed);
             const mappedUser: UserProfile = {
               id: res.user.id,
               name: res.user.name || res.user.displayName || 'Candidate',
@@ -139,7 +100,7 @@ export default function App() {
               console.warn('[openroles] Could not restore saved resume analysis:', resumeError);
             }
             setUser(mappedUser);
-            setConnectedAccounts(res.connectedAccounts || []);
+            setConnectedAccounts(res.connectedAccounts || res.connected_accounts || []);
             setOnboardingStep(res.user.onboardingStep || (isComplete ? 'completed' : 'accounts'));
             localStorage.setItem('openroles_user', JSON.stringify(mappedUser));
           }
@@ -275,7 +236,7 @@ export default function App() {
           isOnboarded: isComplete
         };
         setUser(mappedUser);
-        setConnectedAccounts(res.connectedAccounts || []);
+        setConnectedAccounts(res.connectedAccounts || res.connected_accounts || []);
         localStorage.setItem('openroles_user', JSON.stringify(mappedUser));
         setAuthScreenOpen(false);
 
@@ -291,6 +252,7 @@ export default function App() {
       }
     } catch (err: any) {
       showToast(err.message || 'Error synchronizing user session with PostgreSQL backend.');
+      throw err;
     }
   };
 

@@ -4,6 +4,7 @@ from typing import List
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "openroles-fastapi"
+    FIREBASE_PROJECT_ID: str = "job-portal-ai-818f8"
     API_V1_STR: str = "/api"
     SECRET_KEY: str = os.getenv("SECRET_KEY", "openroles_secret_jwt_key_super_secure_2026")
     ALGORITHM: str = "HS256"

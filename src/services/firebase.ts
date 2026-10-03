@@ -14,7 +14,10 @@ import {
   signOut,
   onAuthStateChanged,
   User as FirebaseUser,
-  updateProfile
+  updateProfile,
+  reload,
+  linkWithCredential,
+  OAuthCredential
 } from 'firebase/auth';
 import { getAnalytics } from 'firebase/analytics';
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
@@ -50,6 +53,38 @@ const emailVerificationActionCodeSettings: ActionCodeSettings = {
 };
 export const emailForSignInStorageKey = 'emailForSignIn';
 
+export class FirebaseAuthFlowError extends Error {
+  constructor(
+    message: string,
+    public readonly code?: string,
+    public readonly email?: string
+  ) {
+    super(message);
+    this.name = 'FirebaseAuthFlowError';
+  }
+}
+
+let pendingGoogleCredential: OAuthCredential | null = null;
+let pendingGoogleEmail: string | null = null;
+
+async function linkPendingGoogleCredential(user: FirebaseUser): Promise<FirebaseUser> {
+  if (!pendingGoogleCredential) return user;
+  if (
+    pendingGoogleEmail &&
+    user.email?.trim().toLowerCase() !== pendingGoogleEmail.trim().toLowerCase()
+  ) {
+    throw new FirebaseAuthFlowError(
+      'Sign in with the same email address that you used with Google to link the accounts.'
+    );
+  }
+
+  const credential = pendingGoogleCredential;
+  const linked = await linkWithCredential(user, credential);
+  pendingGoogleCredential = null;
+  pendingGoogleEmail = null;
+  return linked.user;
+}
+
 // Validate Connection to Firestore on startup
 async function testFirestoreConnection() {
   try {
@@ -84,7 +119,7 @@ export function getFirebaseErrorMessage(error: any): string {
     case 'auth/popup-blocked':
       return 'Popup was blocked by your browser. Please allow popups for openroles or use Email sign-in.';
     case 'auth/unauthorized-domain':
-      return 'This app domain is not yet allowlisted in Firebase Auth authorized domains. Please use Email Sign-Up or Demo Sign-In.';
+      return 'This app domain is not yet allowlisted in Firebase Auth authorized domains. Please use email sign-in or ask an administrator to allowlist this domain.';
     case 'auth/api-key-not-valid':
     case 'auth/api-key-not-valid.-please-pass-a-valid-api-key.':
       return 'Firebase API key is refreshing. Please try again or use direct login.';
@@ -124,7 +159,15 @@ export async function signInWithGoogle(): Promise<{ user: FirebaseUser; token: s
     return { user: result.user, token };
   } catch (error: any) {
     console.error('[Firebase Auth] Google Sign-In Error:', error);
-    throw new Error(getFirebaseErrorMessage(error));
+    if (error?.code === 'auth/account-exists-with-different-credential') {
+      pendingGoogleCredential = GoogleAuthProvider.credentialFromError(error);
+      pendingGoogleEmail = error.customData?.email || null;
+    }
+    throw new FirebaseAuthFlowError(
+      getFirebaseErrorMessage(error),
+      error?.code,
+      error?.customData?.email
+    );
   }
 }
 
@@ -153,7 +196,7 @@ export async function registerWithEmail(
     return { user: result.user, token, emailVerificationSent: emailSent };
   } catch (error: any) {
     console.error('[Firebase Auth] Email Registration Error:', error);
-    throw new Error(getFirebaseErrorMessage(error));
+    throw new FirebaseAuthFlowError(getFirebaseErrorMessage(error), error?.code);
   }
 }
 
@@ -166,11 +209,13 @@ export async function loginWithEmail(
 ): Promise<{ user: FirebaseUser; token: string }> {
   try {
     const result = await signInWithEmailAndPassword(auth, email.trim(), pass);
-    const token = await result.user.getIdToken();
-    return { user: result.user, token };
+    const user = await linkPendingGoogleCredential(result.user);
+    const token = await user.getIdToken();
+    return { user, token };
   } catch (error: any) {
     console.error('[Firebase Auth] Email Login Error:', error);
-    throw new Error(getFirebaseErrorMessage(error));
+    if (error instanceof FirebaseAuthFlowError) throw error;
+    throw new FirebaseAuthFlowError(getFirebaseErrorMessage(error), error?.code);
   }
 }
 
@@ -208,6 +253,7 @@ export async function completeEmailLinkSignIn(
 ): Promise<{ user: FirebaseUser; token: string }> {
   try {
     const result = await signInWithEmailLink(auth, email.trim(), window.location.href);
+    const user = await linkPendingGoogleCredential(result.user);
     try {
       window.localStorage.removeItem(emailForSignInStorageKey);
     } catch (storageError) {
@@ -218,12 +264,33 @@ export async function completeEmailLinkSignIn(
       currentUrl.searchParams.delete(parameter);
     });
     window.history.replaceState(null, document.title, currentUrl.toString());
-    const token = await result.user.getIdToken();
-    return { user: result.user, token };
+    const token = await user.getIdToken();
+    return { user, token };
   } catch (error: any) {
     console.error('[Firebase Auth] Email Link Sign-In Error:', error);
-    throw new Error(getFirebaseErrorMessage(error));
+    if (error instanceof FirebaseAuthFlowError) throw error;
+    throw new FirebaseAuthFlowError(getFirebaseErrorMessage(error), error?.code);
   }
+}
+
+export async function refreshCurrentFirebaseUser(): Promise<{ user: FirebaseUser; token: string }> {
+  const user = auth.currentUser;
+  if (!user) {
+    throw new FirebaseAuthFlowError('Sign in again to continue.');
+  }
+  await reload(user);
+  if (!user.emailVerified) {
+    throw new FirebaseAuthFlowError('Your email is not verified yet. Open the verification email and try again.');
+  }
+  return { user, token: await user.getIdToken(true) };
+}
+
+export async function resendCurrentEmailVerification(): Promise<void> {
+  const user = auth.currentUser;
+  if (!user) {
+    throw new FirebaseAuthFlowError('Your sign-in session expired. Create your account again to request a verification email.');
+  }
+  await sendEmailVerification(user, emailVerificationActionCodeSettings);
 }
 
 /**

@@ -1,10 +1,10 @@
 import time
-import json
 import logging
 from typing import Optional, Dict, Any
 from fastapi import HTTPException, Security, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
+from jose.exceptions import ExpiredSignatureError
 import httpx
 
 logger = logging.getLogger("firebase_auth")
@@ -27,25 +27,42 @@ async def get_google_public_certs() -> Dict[str, str]:
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(GOOGLE_CERTS_URL)
-            if resp.status_code == 200:
-                _GOOGLE_CERTS = resp.json()
-                # Parse Cache-Control max-age header if available
-                cc = resp.headers.get("cache-control", "")
-                max_age = 3600
-                for part in cc.split(","):
-                    if "max-age" in part:
-                        try:
-                            max_age = int(part.split("=")[1].strip())
-                        except Exception:
-                            pass
-                _GOOGLE_CERTS_EXPIRY = now + max_age
-                return _GOOGLE_CERTS
-    except Exception as e:
-        logger.warning(f"Could not fetch live Google certs: {e}")
+            resp.raise_for_status()
+            certs = resp.json()
+            if not isinstance(certs, dict) or not certs:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Firebase signing keys are temporarily unavailable.",
+                )
+            _GOOGLE_CERTS = certs
+            cache_control = resp.headers.get("cache-control", "")
+            max_age = 3600
+            for part in cache_control.split(","):
+                key, _, value = part.strip().partition("=")
+                if key.lower() == "max-age":
+                    try:
+                        max_age = max(0, int(value.strip()))
+                    except ValueError:
+                        logger.warning("Firebase signing-key response had an invalid max-age header.")
+                    break
+            _GOOGLE_CERTS_EXPIRY = now + max_age
+            return _GOOGLE_CERTS
+    except HTTPException:
+        raise
+    except (httpx.HTTPError, ValueError) as exc:
+        if _GOOGLE_CERTS:
+            logger.warning("Using previously cached Firebase signing keys after refresh failed: %s", exc)
+            return _GOOGLE_CERTS
+        logger.error("Could not retrieve Firebase signing keys: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Firebase token verification is temporarily unavailable.",
+        ) from exc
 
-    return _GOOGLE_CERTS
-
-async def verify_firebase_id_token(id_token: str, project_id: Optional[str] = "openroles-portal") -> Dict[str, Any]:
+async def verify_firebase_id_token(
+    id_token: str,
+    project_id: Optional[str] = None
+) -> Dict[str, Any]:
     """
     Verifies a Firebase ID token.
     Extracts and returns:
@@ -64,78 +81,76 @@ async def verify_firebase_id_token(id_token: str, project_id: Optional[str] = "o
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    if not project_id:
+        from ..core.config import settings
+        project_id = settings.FIREBASE_PROJECT_ID
+    if not project_id:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Firebase token verification is not configured.",
+        )
+
     try:
-        # Extract unverified headers to identify key id (kid) and algorithm
         unverified_header = jwt.get_unverified_header(id_token)
         kid = unverified_header.get("kid")
-        alg = unverified_header.get("alg")
-
-        # In production environments with public internet access, verify signature using Google's public certs
-        certs = await get_google_public_certs()
-        if certs and kid in certs:
-            cert = certs[kid]
-            payload = jwt.decode(
-                id_token,
-                cert,
-                algorithms=["RS256"],
-                audience=project_id,
-                issuer=f"https://securetoken.google.com/{project_id}" if project_id else None,
-                options={"verify_exp": True}
-            )
-        else:
-            # Fallback for local development or environments where live Google cert lookup is blocked
-            # We strictly validate token expiration and structure
-            unverified_claims = jwt.get_unverified_claims(id_token)
-            exp = unverified_claims.get("exp", 0)
-            if time.time() > exp:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Firebase ID token has expired. Please sign in again.",
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
-            payload = unverified_claims
-
-        uid = payload.get("user_id") or payload.get("sub")
-        if not uid:
+        if unverified_header.get("alg") != "RS256" or not isinstance(kid, str):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Malformed token: missing user identifier.",
+                detail="Invalid Firebase ID token.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        certs = await get_google_public_certs()
+        cert = certs.get(kid)
+        if not cert:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Firebase ID token signing key is unknown.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        payload = jwt.decode(
+            id_token,
+            cert,
+            algorithms=["RS256"],
+            audience=project_id,
+            issuer=f"https://securetoken.google.com/{project_id}",
+            options={"verify_exp": True, "verify_iat": True, "verify_aud": True},
+        )
+
+        uid = payload.get("user_id") or payload.get("sub")
+        if not isinstance(uid, str) or not uid or len(uid) > 128:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Malformed Firebase ID token.",
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        firebase_ctx = payload.get("firebase", {})
+        firebase_ctx = payload.get("firebase") or {}
         provider = firebase_ctx.get("sign_in_provider", "custom")
 
         return {
             "uid": str(uid),
-            "email": payload.get("email", ""),
+            "email": payload.get("email"),
             "email_verified": bool(payload.get("email_verified", False)),
             "display_name": payload.get("name") or payload.get("display_name", ""),
-            "photo_url": payload.get("picture", ""),
+            "photo_url": payload.get("picture"),
             "provider": provider,
             "auth_time": payload.get("auth_time"),
             "exp": payload.get("exp"),
-            "raw_payload": payload
         }
 
-    except jwt.ExpiredSignatureError:
+    except HTTPException:
+        raise
+    except ExpiredSignatureError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Firebase ID token has expired. Please refresh your session.",
             headers={"WWW-Authenticate": "Bearer"},
         )
     except JWTError as e:
-        logger.error(f"JWT verification error: {e}")
+        logger.warning("Firebase ID token verification failed: %s", e)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid Firebase ID token signature.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    except Exception as e:
-        logger.error(f"Unexpected token error: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate identity token.",
+            detail="Invalid or expired Firebase ID token.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -149,4 +164,10 @@ async def get_current_firebase_user(
             detail="Authentication required. Please include Authorization: Bearer <token>",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return await verify_firebase_id_token(credentials.credentials)
+    claims = await verify_firebase_id_token(credentials.credentials)
+    if not claims.get("email_verified"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Verify your email address before accessing your account.",
+        )
+    return claims
