@@ -26,12 +26,8 @@ interface ApplicationTrackerViewProps {
 }
 
 const COLUMNS: { id: ApplicationStatus; label: string; color: string; badge: string }[] = [
-  { id: 'saved', label: 'Saved', color: 'border-slate-300', badge: 'bg-slate-100 text-slate-700' },
-  { id: 'applied', label: 'Applied', color: 'border-blue-400', badge: 'bg-blue-50 text-blue-700' },
-  { id: 'screening', label: 'Screening', color: 'border-amber-400', badge: 'bg-amber-50 text-amber-700' },
-  { id: 'interview', label: 'Interview', color: 'border-green-500', badge: 'bg-green-50 text-green-800' },
-  { id: 'offer', label: 'Offer', color: 'border-emerald-600', badge: 'bg-emerald-100 text-emerald-800' },
-  { id: 'rejected', label: 'Rejected', color: 'border-slate-200', badge: 'bg-slate-100 text-slate-500' }
+  { id: 'draft', label: 'Started', color: 'border-slate-300', badge: 'bg-slate-100 text-slate-700' },
+  { id: 'applied', label: 'Submitted by you', color: 'border-blue-400', badge: 'bg-blue-50 text-blue-700' },
 ];
 
 export const ApplicationTrackerView: React.FC<ApplicationTrackerViewProps> = ({
@@ -71,7 +67,7 @@ export const ApplicationTrackerView: React.FC<ApplicationTrackerViewProps> = ({
             Application Tracker
           </h1>
           <p className="text-sm text-slate-600 mt-0.5">
-            Organize and track your recruitment pipeline from initial application to offer stage.
+            Track the application actions you have recorded. Employer decisions are shown only when verified by an authorized source.
           </p>
         </div>
 
