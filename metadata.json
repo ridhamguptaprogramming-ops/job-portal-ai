@@ -1,0 +1,6 @@
+{
+  "name": "CareerMatch - Professional Job Discovery & Matching Portal",
+  "description": "A production-grade job discovery platform featuring resume skill extraction, intelligent profile matching, multi-source job aggregation, and application tracking.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

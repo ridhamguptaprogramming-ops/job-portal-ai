@@ -1,0 +1,92 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile and authentication metadata",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "User unique identifier"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "User email address"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Full name"
+        },
+        "photoUrl": {
+          "type": "string",
+          "description": "Profile picture URL"
+        },
+        "headline": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Professional headline"
+        },
+        "location": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Primary location"
+        },
+        "onboardingCompleted": {
+          "type": "boolean",
+          "description": "Whether onboarding has been completed"
+        },
+        "termsAccepted": {
+          "type": "boolean",
+          "description": "Whether terms & conditions have been accepted"
+        },
+        "termsVersion": {
+          "type": "string",
+          "description": "Version of terms accepted"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last updated ISO timestamp"
+        }
+      },
+      "required": ["id", "email", "name"]
+    },
+    "UserConsent": {
+      "title": "UserConsent",
+      "description": "User legal terms and privacy consents",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "UID of consenting user"
+        },
+        "documentType": {
+          "type": "string",
+          "description": "Type of legal document"
+        },
+        "documentVersion": {
+          "type": "string",
+          "description": "Version accepted"
+        },
+        "acceptedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Consent timestamp"
+        }
+      },
+      "required": ["userId", "documentType", "documentVersion", "acceptedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Stores user profiles with owner-only access"
+    },
+    "/users/{userId}/consents/{consentId}": {
+      "schema": "UserConsent",
+      "description": "Stores user consent records"
+    }
+  }
+}
