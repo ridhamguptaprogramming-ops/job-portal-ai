@@ -1,12 +1,9 @@
 {
-  "projectId": "gen-lang-client-0000443449",
-  "appId": "1:63676271517:web:011d726b14dfb7cdba3d74",
-  "apiKey": "AIzaSyAM0wrOzaNe_bagP1_rSwpNwkd_CrUdhBw",
-  "authDomain": "gen-lang-client-0000443449.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-careermatchprofe-72e3a67e-2c19-4d86-8bc5-88c6c0e16039",
-  "storageBucket": "gen-lang-client-0000443449.firebasestorage.app",
-  "messagingSenderId": "63676271517",
-  "measurementId": "",
-  "oAuthClientId": "63676271517-ke010ikv3c3adip915ublc2705v7jlan.apps.googleusercontent.com",
-  "recaptchaSiteKey": ""
+  "apiKey": "AIzaSyCBkZu7oHzidDMcUPyxSy2iAwGjizIXFaQ",
+  "authDomain": "job-portal-ai-818f8.firebaseapp.com",
+  "projectId": "job-portal-ai-818f8",
+  "storageBucket": "job-portal-ai-818f8.firebasestorage.app",
+  "messagingSenderId": "664253664892",
+  "appId": "1:664253664892:web:1c6657a165f4ae85f343f9",
+  "measurementId": "G-5Q9V15P4WK"
 }

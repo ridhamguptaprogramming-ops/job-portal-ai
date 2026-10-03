@@ -12,6 +12,7 @@ import {
   User as FirebaseUser,
   updateProfile
 } from 'firebase/auth';
+import { getAnalytics } from 'firebase/analytics';
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import appletConfig from '../../firebase-applet-config.json';
 
@@ -35,8 +36,9 @@ const app: FirebaseApp = getApps().length > 0 ? getApp() : initializeApp(firebas
 // Initialize Firebase Authentication
 export const auth = getAuth(app);
 
-// Initialize Firestore with configured database ID
-export const db = getFirestore(app, appletConfig.firestoreDatabaseId);
+// Initialize Firebase Analytics and the default Firestore database
+export const analytics = getAnalytics(app);
+export const db = getFirestore(app);
 
 // Validate Connection to Firestore on startup
 async function testFirestoreConnection() {
