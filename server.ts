@@ -46,6 +46,24 @@ app.get('/api/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok' });
 });
 
+// These APIs are owned by FastAPI; fail closed instead of serving stale in-memory data.
+app.use(
+  [
+    '/api/jobs',
+    '/api/saved-jobs',
+    '/api/applications',
+    '/api/notifications',
+    '/api/dashboard',
+    '/api/emails',
+    '/api/integrations'
+  ],
+  (_req: Request, res: Response) => {
+    res.status(503).json({
+      detail: 'This API is not served by the Express process. Configure and deploy the FastAPI service for this feature.'
+    });
+  }
+);
+
 // Live backend diagnosis endpoint
 app.get('/api/backend-diagnostic', async (_req: Request, res: Response) => {
   try {
@@ -61,14 +79,14 @@ app.get('/api/backend-diagnostic', async (_req: Request, res: Response) => {
       isOnline: probe.ok,
       message: probe.ok
         ? 'Render FastAPI backend is reachable and healthy.'
-        : `Render returned ${probe.status} (${xRender === 'no-server' ? 'no-server: service is spun down or undeployed' : 'error'}). Local fallback active.`
+        : `Render returned ${probe.status} (${xRender === 'no-server' ? 'no-server: service is spun down or undeployed' : 'error'}). API-backed features are unavailable.`
     });
   } catch (err: any) {
     res.json({
       renderUrl: 'https://job-portal-fastapi.onrender.com',
       status: 0,
       isOnline: false,
-      message: `Cannot reach Render service: ${err.message}. Local fallback active.`
+      message: `Cannot reach Render service: ${err.message}. API-backed features are unavailable.`
     });
   }
 });
