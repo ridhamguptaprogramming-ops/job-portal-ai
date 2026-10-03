@@ -25,13 +25,41 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
-// CORS headers supporting Vercel and all origins
+const defaultCorsOrigins = [
+  'https://job-portal-ai-one.vercel.app',
+  'http://localhost:3000',
+  'http://localhost:5173'
+];
+const corsOriginSetting = process.env.CORS_ORIGINS?.trim();
+const allowedCorsOrigins = new Set<string>(
+  corsOriginSetting
+    ? corsOriginSetting.startsWith('[')
+      ? parseCorsOriginArray(corsOriginSetting)
+      : corsOriginSetting.split(',').map((origin) => origin.trim()).filter(Boolean)
+    : defaultCorsOrigins
+);
+
+function parseCorsOriginArray(value: string): string[] {
+  const parsed: unknown = JSON.parse(value);
+  if (!Array.isArray(parsed) || parsed.some((origin) => typeof origin !== 'string' || !origin.trim())) {
+    throw new Error('CORS_ORIGINS must be a JSON array of non-empty origins or a comma-separated list.');
+  }
+  return parsed.map((origin: string) => origin.trim());
+}
+
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.header('Access-Control-Allow-Credentials', 'true');
+  const origin = req.headers.origin;
+  if (origin && allowedCorsOrigins.has(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('Vary', 'Origin');
+  }
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
   if (req.method === 'OPTIONS') {
+    if (origin && !allowedCorsOrigins.has(origin)) {
+      return res.sendStatus(403);
+    }
     return res.sendStatus(200);
   }
   next();

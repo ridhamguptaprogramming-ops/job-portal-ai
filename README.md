@@ -65,7 +65,9 @@ Configure `VITE_API_URL` to the deployed FastAPI origin for jobs, saved jobs,
 applications, and account data. `VITE_AUTH_API_URL` controls the auth and
 onboarding routes and defaults to `VITE_API_URL`. The frontend's configured
 Render origin must be updated if that service URL changes. Set FastAPI
-`CORS_ORIGINS` to the exact deployed frontend origins.
+`CORS_ORIGINS` to the exact deployed frontend origins. The Express server uses
+the same variable (as a JSON array or comma-separated list) and does not allow
+arbitrary origins.
 
 Job listings are read from PostgreSQL and are limited to active listings from
 verified sources. This repository does not include a configured job-feed
