@@ -10,8 +10,7 @@ import {
   ApplicationStatus,
   ConnectedPortals,
   SentEmail,
-  Interview,
-  AIApplySettings
+  Interview
 } from './types/job';
 import { ConnectedAccount, AccountProvider, OnboardingStep } from './types/auth';
 import { calculateJobMatch } from './services/matchingEngine';
@@ -39,7 +38,6 @@ import { TermsAndConditionsScreen } from './components/TermsAndConditionsScreen'
 import { ApplyModal } from './components/ApplyModal';
 import { InterviewsView } from './components/InterviewsView';
 import { AdminQualityView } from './components/AdminQualityView';
-import { AIApplyModal } from './components/AIApplyModal';
 import { SentEmailsModal } from './components/SentEmailsModal';
 
 function mapApplicationRecord(record: any): Application | null {
@@ -549,9 +547,6 @@ export default function App() {
             {currentView === 'quality' && (
               <AdminQualityView
                 jobs={jobs}
-                onTriggerReverify={() => {
-                  showToast('100% verified sources checked.');
-                }}
               />
             )}
           </>

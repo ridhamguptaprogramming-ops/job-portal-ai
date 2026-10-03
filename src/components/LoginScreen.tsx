@@ -152,7 +152,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
           Career<span className="text-green-600">Match</span> Portal
         </h2>
         <p className="mt-1.5 text-xs sm:text-sm text-slate-600 max-w-sm mx-auto">
-          Unified application gateway for genuine Indian & global recruitment boards.
+          Sign in to find jobs and manage your own application tracker.
         </p>
       </div>
 
@@ -163,7 +163,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
           <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-600 flex items-start gap-2.5">
             <ShieldCheck className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />
             <div>
-              <span className="font-bold text-slate-800">Verified Direct Submissions:</span> Applications are transmitted directly to destination portals (Naukri, LinkedIn, Indeed) with confirmation receipts sent to your personal email.
+              Applications are completed on employer websites. This portal does not submit applications or send application confirmation emails.
             </div>
           </div>
 
