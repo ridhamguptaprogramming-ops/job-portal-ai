@@ -43,12 +43,8 @@ import { AIApplyModal } from './components/AIApplyModal';
 import { SentEmailsModal } from './components/SentEmailsModal';
 
 function mapApplicationRecord(record: any): Application | null {
-  if (!record?.job) return null;
-  const status: ApplicationStatus = record.status === 'started'
-    ? 'draft'
-    : record.status === 'submitted' || record.status === 'applied'
-      ? 'applied'
-      : record.status;
+  if (!record?.job || !['started', 'submitted', 'applied'].includes(record.status)) return null;
+  const status: ApplicationStatus = record.status === 'started' ? 'draft' : 'applied';
   return {
     id: String(record.id),
     jobId: String(record.job_id),
@@ -247,50 +243,13 @@ export default function App() {
         } else {
           setOnboardingStep('accounts');
           setCurrentView('onboarding');
-          showToast('Authentication confirmed via Firebase. Please connect your professional accounts.');
+          showToast('Authentication confirmed via Firebase. Optional profile integrations are not configured yet.');
         }
       }
     } catch (err: any) {
       showToast(err.message || 'Error synchronizing user session with PostgreSQL backend.');
       throw err;
     }
-  };
-
-  // Section 14, 15, 16: GitHub Connection Handler
-  const handleConnectGitHub = async (username: string) => {
-    const res = await api.connectGitHub(username);
-    if (res && res.connectedAccount) {
-      setConnectedAccounts((prev) => {
-        const filtered = prev.filter((a) => a.provider !== 'github');
-        return [...filtered, res.connectedAccount];
-      });
-      showToast(`Connected GitHub account @${username}`);
-    }
-  };
-
-  // Section 11, 12, 13: LinkedIn Connection Handler
-  const handleConnectLinkedIn = async () => {
-    const res = await api.connectLinkedIn();
-    if (res && res.connectedAccount) {
-      setConnectedAccounts((prev) => {
-        const filtered = prev.filter((a) => a.provider !== 'linkedin');
-        return [...filtered, res.connectedAccount];
-      });
-      showToast('LinkedIn profile connected via official OAuth.');
-    }
-  };
-
-  // Section 40: Manual Re-sync Handler
-  const handleSyncAccount = async (provider: AccountProvider) => {
-    if (provider === 'github') {
-      const ghAcc = connectedAccounts.find((a) => a.provider === 'github');
-      if (ghAcc?.providerUsername) {
-        await handleConnectGitHub(ghAcc.providerUsername);
-      }
-    } else {
-      await handleConnectLinkedIn();
-    }
-    showToast(`Synced latest data from ${provider}.`);
   };
 
   // Section 41: Disconnect Account Handler
@@ -318,8 +277,16 @@ export default function App() {
   // Section 36: Full Logout Handler
   const handleLogout = async () => {
     await signOutFirebase();
-    await api.logout();
+    try {
+      await api.logout();
+    } catch (error) {
+      console.error('[openroles] Could not clear backend session during sign-out:', error);
+    }
     setUser(null);
+    setConnectedAccounts([]);
+    setSavedJobIds(new Set());
+    setApplications([]);
+    setNotifications([]);
     localStorage.removeItem('openroles_user');
     setCurrentView('home');
     setOnboardingStep('accounts');
@@ -327,85 +294,107 @@ export default function App() {
   };
 
   // Save toggle
-  const handleSaveToggle = (jobId: string) => {
-    setSavedJobIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(jobId)) {
-        next.delete(jobId);
-        showToast('Role removed from saved');
-        api.unsaveJob(jobId).catch(() => {});
+  const handleSaveToggle = async (jobId: string) => {
+    if (!user) {
+      setAuthMode('signin');
+      setAuthScreenOpen(true);
+      return;
+    }
+
+    const isSaved = savedJobIds.has(jobId);
+    try {
+      if (isSaved) {
+        await api.unsaveJob(jobId);
+        setSavedJobIds((previous) => {
+          const next = new Set(previous);
+          next.delete(jobId);
+          return next;
+        });
+        showToast('Role removed from saved jobs.');
       } else {
-        next.add(jobId);
-        showToast('Role saved to your collection');
-        api.saveJob(jobId).catch(() => {});
+        await api.saveJob(jobId);
+        setSavedJobIds((previous) => new Set(previous).add(jobId));
+        showToast('Role saved.');
       }
-      localStorage.setItem('openroles_saved', JSON.stringify(Array.from(next)));
-      return next;
-    });
+    } catch (error: any) {
+      console.error('[openroles] Could not update saved job:', error);
+      showToast(error.message || 'Could not update saved jobs.');
+    }
   };
 
-  // Genuine Application Submission handler
-  const handleSubmitApplication = (
-    job: Job,
-    notes: string,
-    screenshotBase64?: string,
-    portalName: string = 'Naukri.com Enterprise ATS',
-    transactionId: string = `TX-OPEN-${Date.now().toString().slice(-6)}`
-  ) => {
-    const candidateEmail = user?.email || 'alex.morgan@openroles.example';
+  const handleApplyClick = (job: Job) => {
+    if (!user) {
+      setAuthMode('signin');
+      setAuthScreenOpen(true);
+      return;
+    }
+    setApplyingJob(job);
+  };
 
-    const newApp: Application = {
-      id: 'app-' + Date.now(),
-      jobId: job.id,
-      job,
-      status: 'applied',
-      appliedDate: new Date().toISOString().split('T')[0],
-      notes: notes || `Direct submission through ${portalName}`,
-      destinationPortal: portalName,
-      submissionTransactionId: transactionId,
-      screenshotUrl: screenshotBase64 ? 'attached' : undefined,
-      emailDispatchedTo: candidateEmail,
-      confirmationEmailSent: true,
-      updatedAt: new Date().toISOString()
-    };
+  const handleSubmitApplication = async (job: Job, notes: string) => {
+    if (!user) throw new Error('Sign in to record application activity.');
 
-    setApplications((prev) => {
-      const updated = [newApp, ...prev.filter((a) => a.jobId !== job.id)];
-      localStorage.setItem('openroles_apps', JSON.stringify(updated));
-      return updated;
+    const result = await api.createApplication({
+      job_id: job.id,
+      status: 'started',
+      notes,
     });
+    const application = mapApplicationRecord(result);
+    if (!application) {
+      throw new Error('The application activity was saved, but the server returned an incomplete job record.');
+    }
 
-    const newSentEmail: SentEmail = {
-      id: 'email-' + Date.now(),
-      to: candidateEmail,
-      customerEmail: `hiring@${job.company.toLowerCase().replace(/[^a-z0-9]/g, '')}.com`,
-      subject: `Application Confirmed: ${job.title} at ${job.company} [Ref: ${transactionId}]`,
-      htmlBody: `Application submitted for ${job.title} via ${portalName}`,
-      jobTitle: job.title,
-      company: job.company,
-      portalName,
-      transactionId,
-      screenshotBase64,
-      sentAt: new Date().toISOString(),
-      status: 'delivered'
-    };
-
-    setSentEmails((prev) => [newSentEmail, ...prev]);
-
-    setNotifications((prev) => [
-      {
-        id: 'notif-' + Date.now(),
-        title: `Application Confirmed: ${job.company}`,
-        message: `Submitted for ${job.title} via ${portalName}. Confirmation email sent to ${candidateEmail}.`,
-        type: 'application_update',
-        jobId: job.id,
-        read: false,
-        createdAt: new Date().toISOString()
-      },
-      ...prev
+    setApplications((previous) => [
+      application,
+      ...previous.filter((item) => item.id !== application.id),
     ]);
+    showToast('Application start recorded. OpenRoles cannot verify whether the employer received your application.');
+  };
 
-    showToast(`Application confirmed! Confirmation dispatched to ${candidateEmail}`);
+  const handleUpdateStatus = async (applicationId: string, status: ApplicationStatus) => {
+    const backendStatus = status === 'draft'
+      ? 'started'
+      : status === 'applied'
+        ? 'submitted'
+        : null;
+    if (!backendStatus) {
+      showToast('Employer decisions can only be recorded from a verified employer source.');
+      return;
+    }
+
+    try {
+      const result = await api.updateApplication(applicationId, { status: backendStatus });
+      const application = mapApplicationRecord(result);
+      if (!application) throw new Error('The server returned an incomplete application record.');
+      setApplications((previous) => previous.map((item) => item.id === application.id ? application : item));
+    } catch (error: any) {
+      console.error('[openroles] Could not update application status:', error);
+      showToast(error.message || 'Could not update application status.');
+    }
+  };
+
+  const handleUpdateNotes = async (applicationId: string, notes: string) => {
+    try {
+      const result = await api.updateApplication(applicationId, { notes });
+      const application = mapApplicationRecord(result);
+      if (!application) throw new Error('The server returned an incomplete application record.');
+      setApplications((previous) => previous.map((item) => item.id === application.id ? application : item));
+    } catch (error: any) {
+      console.error('[openroles] Could not save application notes:', error);
+      showToast(error.message || 'Could not save application notes.');
+      throw error;
+    }
+  };
+
+  const handleDeleteApplication = async (applicationId: string) => {
+    try {
+      await api.deleteApplication(applicationId);
+      setApplications((previous) => previous.filter((item) => item.id !== applicationId));
+      showToast('Application activity removed from your tracker.');
+    } catch (error: any) {
+      console.error('[openroles] Could not delete application:', error);
+      showToast(error.message || 'Could not delete application activity.');
+    }
   };
 
   return (
@@ -455,9 +444,6 @@ export default function App() {
               userEmail={user.email}
               userName={user.name}
               connectedAccounts={connectedAccounts}
-              onConnectGitHub={handleConnectGitHub}
-              onConnectLinkedIn={handleConnectLinkedIn}
-              onSyncAccount={handleSyncAccount}
               onDisconnectAccount={handleDisconnectAccount}
               onContinue={() => setOnboardingStep('terms')}
             />
@@ -472,7 +458,8 @@ export default function App() {
                 user={user}
                 onSaveToggle={handleSaveToggle}
                 onSelectJob={(j) => setSelectedJob(j)}
-                onQuickApply={(j) => setApplyingJob(j)}
+                onQuickApply={handleApplyClick}
+                onJobsLoaded={setJobs}
                 onNavigate={(v) => {
                   if (v === 'auth') {
                     setAuthMode('signup');
@@ -508,29 +495,16 @@ export default function App() {
                 matchMap={matchMap}
                 onRemoveSaved={handleSaveToggle}
                 onSelectJob={(j) => setSelectedJob(j)}
-                onQuickApply={(j) => setApplyingJob(j)}
+                onQuickApply={handleApplyClick}
               />
             )}
 
             {currentView === 'tracker' && (
               <ApplicationTrackerView
                 applications={applications}
-                onUpdateStatus={(appId, status) => {
-                  setApplications((prev) =>
-                    prev.map((a) => (a.id === appId ? { ...a, status } : a))
-                  );
-                  showToast(`Status updated to ${status}`);
-                }}
-                onUpdateNotes={(appId, notes) => {
-                  setApplications((prev) =>
-                    prev.map((a) => (a.id === appId ? { ...a, notes } : a))
-                  );
-                  showToast('Notes saved');
-                }}
-                onDeleteApplication={(appId) => {
-                  setApplications((prev) => prev.filter((a) => a.id !== appId));
-                  showToast('Application removed');
-                }}
+                onUpdateStatus={handleUpdateStatus}
+                onUpdateNotes={handleUpdateNotes}
+                onDeleteApplication={handleDeleteApplication}
                 onSelectJob={(j) => setSelectedJob(j)}
               />
             )}
@@ -538,10 +512,6 @@ export default function App() {
             {currentView === 'interviews' && (
               <InterviewsView
                 interviews={interviews}
-                userEmail={user?.email || 'candidate@openroles.example'}
-                onSendEmailReminder={(interview) => {
-                  showToast(`Interview reminder dispatched for ${interview.role}`);
-                }}
               />
             )}
 
@@ -619,47 +589,19 @@ export default function App() {
           job={selectedJob}
           match={matchMap[selectedJob.id]}
           isSaved={savedJobIds.has(selectedJob.id)}
-          user={user || {
-            id: 'guest',
-            name: 'Guest',
-            email: 'guest@example.com',
-            headline: '',
-            location: '',
-            about: '',
-            careerPreferences: {
-              targetTitles: [],
-              preferredLocations: [],
-              remotePreference: 'any',
-              currency: 'INR'
-            }
-          }}
           onClose={() => setSelectedJob(null)}
           onSaveToggle={handleSaveToggle}
           onApply={(j) => {
             setSelectedJob(null);
-            setApplyingJob(j);
+            handleApplyClick(j);
           }}
         />
       )}
 
       {/* Apply Modal */}
-      {applyingJob && (
+      {applyingJob && user && (
         <ApplyModal
           job={applyingJob}
-          user={user || {
-            id: 'guest',
-            name: 'Candidate',
-            email: 'candidate@openroles.example',
-            headline: '',
-            location: '',
-            about: '',
-            careerPreferences: {
-              targetTitles: [],
-              preferredLocations: [],
-              remotePreference: 'any',
-              currency: 'INR'
-            }
-          }}
           onClose={() => setApplyingJob(null)}
           onSubmitApplication={handleSubmitApplication}
         />
@@ -670,10 +612,18 @@ export default function App() {
         isOpen={notificationsOpen}
         onClose={() => setNotificationsOpen(false)}
         notifications={notifications}
-        onMarkAsRead={(id) => {
-          setNotifications((prev) =>
-            prev.map((n) => (n.id === id ? { ...n, read: true } : n))
-          );
+        onMarkAsRead={async (id) => {
+          try {
+            await api.markNotificationRead(id);
+            setNotifications((previous) =>
+              previous.map((notification) => notification.id === id
+                ? { ...notification, read: true }
+                : notification)
+            );
+          } catch (error: any) {
+            console.error('[openroles] Could not mark notification as read:', error);
+            showToast(error.message || 'Could not update the notification.');
+          }
         }}
         onSelectJobId={(id) => {
           const found = jobs.find((j) => j.id === id);

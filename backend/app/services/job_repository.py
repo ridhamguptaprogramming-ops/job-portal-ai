@@ -376,6 +376,7 @@ def create_application(firebase_uid: str, job_id: str, status_value: str, notes:
                     Job.id == job_uuid,
                     Job.is_active.is_(True),
                     Job.status == "active",
+                    Job.is_verified_source.is_(True),
                 )
             )
             if user is None:
@@ -393,6 +394,7 @@ def create_application(firebase_uid: str, job_id: str, status_value: str, notes:
             application = Application(
                 user_id=user.id,
                 job_id=job.id,
+                job=job,
                 status=status_value,
                 notes=notes,
             )
@@ -519,11 +521,42 @@ def get_user_notifications(firebase_uid: str) -> list[Dict[str, Any]]:
                     "id": str(notification.id),
                     "title": notification.title,
                     "message": notification.message,
+                    "notification_type": notification.notification_type,
+                    "job_id": str(notification.job_id) if notification.job_id else None,
                     "created_at": notification.created_at.isoformat() if notification.created_at else None,
                     "read": bool(notification.is_read),
                 }
                 for notification in notifications
             ]
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Notifications are temporarily unavailable.",
+        ) from exc
+
+
+def mark_notification_read(firebase_uid: str, notification_id: str) -> None:
+    sessions = get_session_factory()
+    try:
+        notification_uuid = UUID(notification_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Notification not found.") from exc
+
+    try:
+        with sessions.begin() as session:
+            notification = session.scalar(
+                select(Notification)
+                .join(User, Notification.user_id == User.id)
+                .where(
+                    Notification.id == notification_uuid,
+                    User.firebase_uid == firebase_uid,
+                )
+            )
+            if notification is None:
+                raise HTTPException(status_code=404, detail="Notification not found.")
+            notification.is_read = True
+    except HTTPException:
+        raise
     except SQLAlchemyError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

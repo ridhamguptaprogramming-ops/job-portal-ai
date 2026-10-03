@@ -2,17 +2,9 @@ import React, { useState } from 'react';
 import {
   Kanban,
   Table as TableIcon,
-  Plus,
   Calendar,
-  Building2,
   Trash2,
-  Edit3,
-  CheckCircle2,
-  Clock,
-  ExternalLink,
-  ChevronRight,
-  Sparkles,
-  AlertCircle
+  Edit3
 } from 'lucide-react';
 import { Application, ApplicationStatus, Job } from '../types/job';
 import { CompanyLogo } from './CompanyLogo';
@@ -20,7 +12,7 @@ import { CompanyLogo } from './CompanyLogo';
 interface ApplicationTrackerViewProps {
   applications: Application[];
   onUpdateStatus: (id: string, status: ApplicationStatus) => void;
-  onUpdateNotes: (id: string, notes: string, interviewDate?: string) => void;
+  onUpdateNotes: (id: string, notes: string) => Promise<void>;
   onDeleteApplication: (id: string) => void;
   onSelectJob: (job: Job) => void;
 }
@@ -40,23 +32,30 @@ export const ApplicationTrackerView: React.FC<ApplicationTrackerViewProps> = ({
   const [viewMode, setViewMode] = useState<'kanban' | 'table'>('kanban');
   const [editingAppId, setEditingAppId] = useState<string | null>(null);
   const [tempNotes, setTempNotes] = useState('');
-  const [tempDate, setTempDate] = useState('');
+  const [isSavingNotes, setIsSavingNotes] = useState(false);
+  const [notesError, setNotesError] = useState<string | null>(null);
 
   const handleStartEdit = (app: Application) => {
     setEditingAppId(app.id);
     setTempNotes(app.notes || '');
-    setTempDate(app.interviewDate ? app.interviewDate.split('T')[0] : '');
   };
 
-  const handleSaveEdit = (appId: string) => {
-    onUpdateNotes(appId, tempNotes, tempDate || undefined);
-    setEditingAppId(null);
+  const handleSaveEdit = async (appId: string) => {
+    setIsSavingNotes(true);
+    setNotesError(null);
+    try {
+      await onUpdateNotes(appId, tempNotes);
+      setEditingAppId(null);
+    } catch (error) {
+      setNotesError(error instanceof Error ? error.message : 'Could not save notes.');
+    } finally {
+      setIsSavingNotes(false);
+    }
   };
 
-  // Metrics
   const totalCount = applications.length;
-  const interviewCount = applications.filter((a) => a.status === 'interview').length;
-  const offerCount = applications.filter((a) => a.status === 'offer').length;
+  const startedCount = applications.filter((application) => application.status === 'draft').length;
+  const submittedCount = applications.filter((application) => application.status === 'applied').length;
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
@@ -101,30 +100,24 @@ export const ApplicationTrackerView: React.FC<ApplicationTrackerViewProps> = ({
       </div>
 
       {/* Metrics Banner */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
         <div className="bg-white border border-slate-200 rounded-lg p-4">
-          <span className="text-xs text-slate-500 font-medium">Total Applications</span>
+          <span className="text-xs text-slate-500 font-medium">Tracked Activity</span>
           <span className="text-2xl font-bold text-slate-900 block mt-1">{totalCount}</span>
         </div>
         <div className="bg-white border border-slate-200 rounded-lg p-4">
-          <span className="text-xs text-slate-500 font-medium">Interviews in Progress</span>
-          <span className="text-2xl font-bold text-green-700 block mt-1">{interviewCount}</span>
+          <span className="text-xs text-slate-500 font-medium">Application Started</span>
+          <span className="text-2xl font-bold text-slate-700 block mt-1">{startedCount}</span>
         </div>
         <div className="bg-white border border-slate-200 rounded-lg p-4">
-          <span className="text-xs text-slate-500 font-medium">Offers Received</span>
-          <span className="text-2xl font-bold text-emerald-600 block mt-1">{offerCount}</span>
-        </div>
-        <div className="bg-white border border-slate-200 rounded-lg p-4">
-          <span className="text-xs text-slate-500 font-medium">Response Rate</span>
-          <span className="text-2xl font-bold text-slate-800 block mt-1">
-            {totalCount > 0 ? Math.round(((interviewCount + offerCount) / totalCount) * 100) : 0}%
-          </span>
+          <span className="text-xs text-slate-500 font-medium">Submitted by You</span>
+          <span className="text-2xl font-bold text-blue-700 block mt-1">{submittedCount}</span>
         </div>
       </div>
 
       {/* View Mode: Kanban */}
       {viewMode === 'kanban' && (
-        <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-3.5 overflow-x-auto pb-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 overflow-x-auto pb-4">
           {COLUMNS.map((col) => {
             const colApps = applications.filter((a) => a.status === col.id);
             return (
@@ -182,15 +175,8 @@ export const ApplicationTrackerView: React.FC<ApplicationTrackerViewProps> = ({
 
                       <div className="text-[10px] text-slate-500 flex items-center gap-1">
                         <Calendar className="w-3 h-3 text-slate-400" />
-                        <span>Applied: {app.appliedDate}</span>
+                        <span>Recorded: {app.appliedDate ? new Date(app.appliedDate).toLocaleDateString() : 'Date unavailable'}</span>
                       </div>
-
-                      {app.interviewDate && (
-                        <div className="text-[10px] text-green-800 bg-green-50 px-2 py-0.5 rounded border border-green-200 font-semibold flex items-center gap-1">
-                          <Clock className="w-3 h-3 text-green-600" />
-                          <span>Interview: {new Date(app.interviewDate).toLocaleDateString()}</span>
-                        </div>
-                      )}
 
                       {/* Notes / Edit */}
                       {editingAppId === app.id ? (
@@ -198,15 +184,10 @@ export const ApplicationTrackerView: React.FC<ApplicationTrackerViewProps> = ({
                           <textarea
                             value={tempNotes}
                             onChange={(e) => setTempNotes(e.target.value)}
-                            placeholder="Add interview notes or feedback..."
+                            maxLength={10000}
+                            placeholder="Add private notes..."
                             className="w-full text-xs p-1.5 border border-slate-300 rounded focus:ring-1 focus:ring-green-600"
                             rows={2}
-                          />
-                          <input
-                            type="date"
-                            value={tempDate}
-                            onChange={(e) => setTempDate(e.target.value)}
-                            className="w-full text-xs p-1 border border-slate-300 rounded"
                           />
                           <div className="flex items-center justify-end gap-1.5">
                             <button
@@ -216,12 +197,16 @@ export const ApplicationTrackerView: React.FC<ApplicationTrackerViewProps> = ({
                               Cancel
                             </button>
                             <button
-                              onClick={() => handleSaveEdit(app.id)}
+                              onClick={() => void handleSaveEdit(app.id)}
+                              disabled={isSavingNotes}
                               className="text-[10px] px-2 py-0.5 bg-green-600 text-white rounded font-semibold"
                             >
-                              Save
+                              {isSavingNotes ? 'Saving…' : 'Save'}
                             </button>
                           </div>
+                          {notesError && (
+                            <p role="alert" className="text-[10px] text-red-700">{notesError}</p>
+                          )}
                         </div>
                       ) : (
                         app.notes && (
@@ -280,8 +265,7 @@ export const ApplicationTrackerView: React.FC<ApplicationTrackerViewProps> = ({
               <tr>
                 <th className="px-4 py-3">Role & Company</th>
                 <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Applied Date</th>
-                <th className="px-4 py-3">Interview Date</th>
+                <th className="px-4 py-3">Recorded Date</th>
                 <th className="px-4 py-3">Notes</th>
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
@@ -325,17 +309,7 @@ export const ApplicationTrackerView: React.FC<ApplicationTrackerViewProps> = ({
                   </td>
 
                   <td className="px-4 py-3.5 text-slate-600">
-                    {app.appliedDate}
-                  </td>
-
-                  <td className="px-4 py-3.5">
-                    {app.interviewDate ? (
-                      <span className="text-green-800 font-semibold bg-green-50 px-2 py-0.5 rounded border border-green-200">
-                        {new Date(app.interviewDate).toLocaleDateString()}
-                      </span>
-                    ) : (
-                      <span className="text-slate-400">—</span>
-                    )}
+                    {app.appliedDate ? new Date(app.appliedDate).toLocaleDateString() : '—'}
                   </td>
 
                   <td className="px-4 py-3.5 text-slate-600 max-w-xs truncate">

@@ -50,3 +50,29 @@ email/password accounts must verify their email before account creation is
 synchronized or onboarding is allowed. Google accounts that conflict with an
 existing provider must sign in to that account and link Google through Firebase
 so the existing UID is preserved.
+
+## Job data and candidate activity
+
+Before deploying the PostgreSQL-backed job and account routes, apply both
+migrations in order to the database configured by `DATABASE_URL`:
+
+```sh
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/migrations/001_firebase_identity.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/migrations/002_job_data.sql
+```
+
+Configure `VITE_API_URL` to the deployed FastAPI origin for jobs, saved jobs,
+applications, and account data. `VITE_AUTH_API_URL` controls the auth and
+onboarding routes and defaults to `VITE_API_URL`. The frontend's configured
+Render origin must be updated if that service URL changes. Set FastAPI
+`CORS_ORIGINS` to the exact deployed frontend origins.
+
+Job listings are read from PostgreSQL and are limited to active listings from
+verified sources. This repository does not include a configured job-feed
+ingestion process; until real verified job data is loaded, the job list will
+correctly be empty. Applying opens the listing's employer URL and lets the
+candidate record a start or self-reported submission in their tracker. The
+application record does not confirm employer receipt, and the app does not
+dispatch applications or confirmation emails. GitHub and LinkedIn account
+linking, OAuth sync, and direct ATS integrations remain unavailable until their
+official OAuth/API flows and credentials are configured.

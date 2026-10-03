@@ -6,7 +6,6 @@ import {
   Building2,
   ExternalLink,
   Download,
-  Mail,
   CheckCircle2,
   ShieldCheck,
   UserCheck,
@@ -18,14 +17,10 @@ import { generateGoogleCalendarUrl, downloadIcsFile } from '../services/calendar
 
 interface InterviewsViewProps {
   interviews: Interview[];
-  userEmail: string;
-  onSendEmailReminder: (interview: Interview) => void;
 }
 
 export const InterviewsView: React.FC<InterviewsViewProps> = ({
-  interviews,
-  userEmail,
-  onSendEmailReminder
+  interviews
 }) => {
   const [downloadSuccessId, setDownloadSuccessId] = useState<string | null>(null);
 
@@ -41,16 +36,16 @@ export const InterviewsView: React.FC<InterviewsViewProps> = ({
       <div className="border-b border-slate-200 pb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
-            Upcoming Confirmed Interviews
+            Upcoming Interviews
           </h1>
           <p className="text-sm text-slate-600 mt-0.5">
-            Confirmed interview rounds from verified employers with automated calendar integration and Asia/Kolkata timezone synchronization.
+            Employer-confirmed interview details will appear here when they are available from a verified source.
           </p>
         </div>
 
         <div className="flex items-center gap-2 bg-green-50 border border-green-200 px-3 py-1.5 rounded-lg text-xs text-green-900 font-semibold self-start sm:self-auto">
           <ShieldCheck className="w-4 h-4 text-green-600" />
-          <span>Employer Confirmed Only</span>
+          <span>Verified details only</span>
         </div>
       </div>
 
@@ -148,10 +143,6 @@ export const InterviewsView: React.FC<InterviewsViewProps> = ({
 
                 {/* Action Buttons: Calendar Integration */}
                 <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-                  <span className="text-[11px] text-slate-500">
-                    Invitation dispatched to verified candidate email: <strong>{userEmail}</strong>
-                  </span>
-
                   <div className="flex flex-wrap items-center gap-2">
                     {/* Add to Google Calendar Button */}
                     <a
@@ -176,16 +167,6 @@ export const InterviewsView: React.FC<InterviewsViewProps> = ({
                       <span>{downloadSuccessId === interview.id ? 'Downloaded!' : 'Download .ics File'}</span>
                     </button>
 
-                    {/* Email Details Reminder Button */}
-                    <button
-                      type="button"
-                      onClick={() => onSendEmailReminder(interview)}
-                      className="px-3.5 py-2 bg-green-50 hover:bg-green-100 border border-green-200 text-green-800 rounded-md text-xs font-semibold transition-colors flex items-center gap-1.5"
-                    >
-                      <Mail className="w-3.5 h-3.5 text-green-600" />
-                      <span>Resend Email Confirmation</span>
-                    </button>
-
                     {/* Join Meeting Button */}
                     <a
                       href={interview.meetingUrl}
@@ -205,10 +186,10 @@ export const InterviewsView: React.FC<InterviewsViewProps> = ({
           <div className="bg-white border border-slate-200 rounded-xl p-12 text-center space-y-2">
             <Calendar className="w-10 h-10 text-slate-400 mx-auto" />
             <h3 className="text-base font-bold text-slate-900">
-              No Confirmed Interviews at this time
+              No employer-confirmed interviews are available
             </h3>
             <p className="text-xs text-slate-500 max-w-md mx-auto">
-              Per our <strong>Absolute No-Fake-Data Policy</strong>, interviews are only displayed when an employer or authorized integration explicitly schedules and confirms a meeting with you.
+              Interviews are shown only when a verified source provides the details. No interview has been recorded for your account yet.
             </p>
           </div>
         )}

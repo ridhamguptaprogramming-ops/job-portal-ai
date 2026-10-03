@@ -490,6 +490,10 @@ class ApiService {
     return res.notifications || [];
   }
 
+  public async markNotificationRead(id: string): Promise<void> {
+    await this.request(`/api/notifications/${encodeURIComponent(id)}/read`, { method: 'POST' });
+  }
+
   public async updateApplication(
     id: string,
     updates: { status?: 'started' | 'submitted'; notes?: string },

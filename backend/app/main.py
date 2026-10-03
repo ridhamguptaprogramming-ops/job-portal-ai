@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from typing import List, Optional, Any, Dict
 from fastapi import FastAPI, HTTPException, Depends, status, UploadFile, File, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from .core.config import settings
@@ -24,6 +24,7 @@ from .services.job_repository import (
     get_saved_jobs as get_saved_job_records,
     get_user_dashboard,
     get_user_notifications,
+    mark_notification_read,
     list_companies,
     list_jobs as list_job_records,
     set_job_saved,
@@ -321,11 +322,11 @@ class ConnectLinkedInPayload(BaseModel):
 class ApplicationPayload(BaseModel):
     job_id: str
     status: Optional[str] = "started"
-    notes: Optional[str] = None
+    notes: Optional[str] = Field(default=None, max_length=10000)
 
 class ApplicationStatusPayload(BaseModel):
     status: Optional[str] = None
-    notes: Optional[str] = None
+    notes: Optional[str] = Field(default=None, max_length=10000)
 
 # ================= ROOT & HEALTH ENDPOINTS =================
 
@@ -412,30 +413,21 @@ def get_company_by_id(company_id: str):
 
 @app.get("/api/admin/company-logo-health")
 def get_company_logo_health():
-    """Admin diagnostic report on company logos, domains, and fallback status (Section 18)."""
+    """Report only company-logo data currently available in the database."""
     companies = list_companies()
     total = len(companies)
     with_logos = [c for c in companies if c.get("logo_url")]
-    without_logos = [c for c in companies if not c.get("logo_url")]
     verified = [c for c in companies if c.get("verified") and c.get("logo_url")]
 
     return {
-        "status": "healthy",
+        "status": "ok" if total else "no_company_data",
         "total_companies": total,
         "companies_with_logos": len(with_logos),
-        "companies_without_logos": len(without_logos),
         "verified_logos": len(verified),
-        "cached_logos": total,
-        "unverified_logos": len(without_logos),
-        "broken_logo_urls": 0,
-        "coverage_percentage": f"{((len(with_logos) / total) * 100):.1f}%",
-        "priority_order": [
-            "1. Explicit trusted provider logo",
-            "2. Verified official brand asset",
-            "3. Verified domain icon/unavatar",
-            "4. Cached company record",
-            "5. Clean initials fallback"
-        ],
+        "unverified_logos": len([
+            company for company in with_logos if not company.get("verified")
+        ]),
+        "coverage_percentage": f"{((len(with_logos) / total) * 100 if total else 0):.1f}%",
         "companies": [
             {
                 "id": c["id"],
@@ -714,3 +706,11 @@ def get_dashboard(current_claims: Dict[str, Any] = Depends(get_current_firebase_
 def get_notifications(current_claims: Dict[str, Any] = Depends(get_current_firebase_user)):
     notifications = get_user_notifications(current_claims["uid"])
     return {"notifications": notifications, "total": len(notifications)}
+
+@app.post("/api/notifications/{notification_id}/read")
+def mark_notification_as_read(
+    notification_id: str,
+    current_claims: Dict[str, Any] = Depends(get_current_firebase_user),
+):
+    mark_notification_read(current_claims["uid"], notification_id)
+    return {"success": True}

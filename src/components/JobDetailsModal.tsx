@@ -16,14 +16,13 @@ import {
   Globe,
   Briefcase
 } from 'lucide-react';
-import { Job, JobMatchBreakdown, UserProfile } from '../types/job';
+import { Job, JobMatchBreakdown } from '../types/job';
 import { CompanyLogo } from './CompanyLogo';
 
 interface JobDetailsModalProps {
   job: Job | null;
   match?: JobMatchBreakdown;
   isSaved: boolean;
-  user: UserProfile;
   onClose: () => void;
   onSaveToggle: (jobId: string) => void;
   onApply: (job: Job) => void;
@@ -59,7 +58,6 @@ export const JobDetailsModal: React.FC<JobDetailsModalProps> = ({
   job,
   match,
   isSaved,
-  user,
   onClose,
   onSaveToggle,
   onApply

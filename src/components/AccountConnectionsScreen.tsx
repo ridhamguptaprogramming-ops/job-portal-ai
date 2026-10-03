@@ -1,17 +1,11 @@
 import React, { useState } from 'react';
 import {
   FolderGit2,
-  ExternalLink,
   CheckCircle2,
   AlertCircle,
-  RefreshCw,
   ArrowRight,
   ShieldCheck,
-  Building2,
-  Info,
-  Trash2,
-  Lock,
-  Layers
+  Trash2
 } from 'lucide-react';
 import { ConnectedAccount, AccountProvider } from '../types/auth';
 
@@ -19,9 +13,6 @@ interface AccountConnectionsScreenProps {
   userEmail: string;
   userName: string;
   connectedAccounts: ConnectedAccount[];
-  onConnectGitHub: (username: string) => Promise<void>;
-  onConnectLinkedIn: () => Promise<void>;
-  onSyncAccount: (provider: AccountProvider) => Promise<void>;
   onDisconnectAccount: (provider: AccountProvider) => Promise<void>;
   onContinue: () => void;
 }
@@ -30,16 +21,9 @@ export const AccountConnectionsScreen: React.FC<AccountConnectionsScreenProps> =
   userEmail,
   userName,
   connectedAccounts,
-  onConnectGitHub,
-  onConnectLinkedIn,
-  onSyncAccount,
   onDisconnectAccount,
   onContinue
 }) => {
-  const [gitHubInput, setGitHubInput] = useState('ridhamgupta805');
-  const [isGitHubModalOpen, setIsGitHubModalOpen] = useState(false);
-  const [isConnecting, setIsConnecting] = useState(false);
-  const [syncingProvider, setSyncingProvider] = useState<string | null>(null);
   const [disconnectConfirm, setDisconnectConfirm] = useState<AccountProvider | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -50,50 +34,6 @@ export const AccountConnectionsScreen: React.FC<AccountConnectionsScreenProps> =
 
   const githubAccount = getAccount('github');
   const linkedinAccount = getAccount('linkedin');
-
-  // Trigger GitHub connection
-  const handleConfirmGitHub = async () => {
-    if (!gitHubInput.trim()) return;
-    setIsConnecting(true);
-    setErrorMsg(null);
-    try {
-      await onConnectGitHub(gitHubInput.trim());
-      setIsGitHubModalOpen(false);
-      setSuccessMsg('GitHub technical profile successfully imported.');
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to connect GitHub account.');
-    } finally {
-      setIsConnecting(false);
-    }
-  };
-
-  // Trigger LinkedIn connection
-  const handleTriggerLinkedIn = async () => {
-    setIsConnecting(true);
-    setErrorMsg(null);
-    try {
-      await onConnectLinkedIn();
-      setSuccessMsg('LinkedIn professional profile connected via official OAuth.');
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to authorize LinkedIn.');
-    } finally {
-      setIsConnecting(false);
-    }
-  };
-
-  // Sync action
-  const handleSync = async (provider: AccountProvider) => {
-    setSyncingProvider(provider);
-    setErrorMsg(null);
-    try {
-      await onSyncAccount(provider);
-      setSuccessMsg(`Refreshed data from ${provider}.`);
-    } catch (err: any) {
-      setErrorMsg(err.message || `Failed to sync ${provider}.`);
-    } finally {
-      setSyncingProvider(null);
-    }
-  };
 
   // Disconnect action
   const handleDisconnect = async (provider: AccountProvider) => {
@@ -128,7 +68,7 @@ export const AccountConnectionsScreen: React.FC<AccountConnectionsScreenProps> =
             Connect your accounts
           </h1>
           <p className="text-xs sm:text-sm text-[#666666] leading-relaxed">
-            Connect your professional and technical profiles to populate verified skills, showcase repositories, and power intelligent job matching. All integrations are optional and you can connect more later.
+            Official profile integrations are not configured yet. Existing saved connections are shown below; new connections are disabled until verified OAuth flows are available.
           </p>
         </div>
 
@@ -159,62 +99,36 @@ export const AccountConnectionsScreen: React.FC<AccountConnectionsScreenProps> =
                   <div className="flex items-center gap-2">
                     <h3 className="text-sm font-bold text-[#1F1F1F]">LinkedIn</h3>
                     {linkedinAccount ? (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 border border-emerald-200">
-                        <CheckCircle2 className="w-3 h-3" /> Connected
+                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-800 bg-amber-50 px-2 py-0.5 border border-amber-200">
+                        Saved record
                       </span>
                     ) : (
                       <span className="text-[10px] font-semibold text-[#82877D] bg-slate-100 px-2 py-0.5">
-                        Optional
+                        Not configured
                       </span>
                     )}
                   </div>
                   <p className="text-xs text-[#666666]">
-                    Import verified candidate headline, current role, and verified experience summary via official LinkedIn OAuth.
+                    Official LinkedIn OAuth is not configured yet. No LinkedIn profile data is being imported.
                   </p>
                   {linkedinAccount && (
-                    <div className="text-[11px] text-[#82877D] pt-1">
-                      <span>Last synced: {new Date(linkedinAccount.lastSyncedAt).toLocaleTimeString()}</span>
+                    <div className="text-[11px] text-amber-800 pt-1">
+                      This saved record does not confirm LinkedIn account ownership.
                     </div>
                   )}
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 sm:self-center">
-                {linkedinAccount ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => handleSync('linkedin')}
-                      disabled={syncingProvider === 'linkedin'}
-                      className="px-3 py-1.5 border border-[#E5E5E5] bg-white hover:bg-slate-50 text-xs font-semibold text-[#1F1F1F] flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                    >
-                      <RefreshCw
-                        className={`w-3.5 h-3.5 ${
-                          syncingProvider === 'linkedin' ? 'animate-spin' : ''
-                        }`}
-                      />
-                      <span>Sync</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDisconnectConfirm('linkedin')}
-                      className="p-1.5 text-slate-400 hover:text-red-600 cursor-pointer"
-                      title="Disconnect LinkedIn"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={handleTriggerLinkedIn}
-                    disabled={isConnecting}
-                    className="px-4 py-2 bg-[#0A66C2] hover:bg-[#084e96] text-white text-xs font-bold transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
-                  >
-                    Connect LinkedIn
-                  </button>
-                )}
-              </div>
+              {linkedinAccount && (
+                <button
+                  type="button"
+                  onClick={() => setDisconnectConfirm('linkedin')}
+                  className="p-1.5 text-slate-400 hover:text-red-600 cursor-pointer"
+                  title="Disconnect LinkedIn"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              )}
             </div>
           </div>
 
@@ -229,116 +143,41 @@ export const AccountConnectionsScreen: React.FC<AccountConnectionsScreenProps> =
                   <div className="flex items-center gap-2">
                     <h3 className="text-sm font-bold text-[#1F1F1F]">GitHub</h3>
                     {githubAccount ? (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 border border-emerald-200">
-                        <CheckCircle2 className="w-3 h-3" /> Connected
+                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-800 bg-amber-50 px-2 py-0.5 border border-amber-200">
+                        Saved record
                       </span>
                     ) : (
                       <span className="text-[10px] font-semibold text-[#82877D] bg-slate-100 px-2 py-0.5">
-                        Recommended
+                        Not configured
                       </span>
                     )}
                   </div>
                   <p className="text-xs text-[#666666]">
-                    Import public repositories, programming languages, and verified GitHub engineering activity.
+                    Official GitHub OAuth is not configured yet. Entering a username alone does not verify account ownership.
                   </p>
-                  {githubAccount && githubAccount.summary && (
-                    <div className="pt-2 text-[11px] text-[#53594F] space-y-1">
-                      <div className="font-semibold">
-                        @{githubAccount.providerUsername} · {githubAccount.summary.reposCount || 0} public repositories
-                      </div>
-                      {githubAccount.summary.topSkills && (
-                        <div className="flex flex-wrap gap-1">
-                          {githubAccount.summary.topSkills.map((sk) => (
-                            <span
-                              key={sk}
-                              className="px-1.5 py-0.5 bg-slate-100 text-[#1F1F1F] text-[10px] font-medium"
-                            >
-                              {sk}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                      <div className="text-[#82877D]">
-                        Last synced: {new Date(githubAccount.lastSyncedAt).toLocaleTimeString()}
-                      </div>
+                  {githubAccount && (
+                    <div className="text-[11px] text-amber-800 pt-1">
+                      This saved record does not confirm GitHub account ownership or verify imported data.
                     </div>
                   )}
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 sm:self-center">
-                {githubAccount ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => handleSync('github')}
-                      disabled={syncingProvider === 'github'}
-                      className="px-3 py-1.5 border border-[#E5E5E5] bg-white hover:bg-slate-50 text-xs font-semibold text-[#1F1F1F] flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                    >
-                      <RefreshCw
-                        className={`w-3.5 h-3.5 ${
-                          syncingProvider === 'github' ? 'animate-spin' : ''
-                        }`}
-                      />
-                      <span>Sync</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDisconnectConfirm('github')}
-                      className="p-1.5 text-slate-400 hover:text-red-600 cursor-pointer"
-                      title="Disconnect GitHub"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setIsGitHubModalOpen(true)}
-                    className="px-4 py-2 bg-[#1F1F1F] hover:bg-black text-white text-xs font-bold transition-colors cursor-pointer whitespace-nowrap"
-                  >
-                    Connect GitHub
-                  </button>
-                )}
-              </div>
+              {githubAccount && (
+                <button
+                  type="button"
+                  onClick={() => setDisconnectConfirm('github')}
+                  className="p-1.5 text-slate-400 hover:text-red-600 cursor-pointer"
+                  title="Disconnect GitHub"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              )}
             </div>
           </div>
 
-          {/* 3. Supported Job Portal Gateways (Section 17) */}
-          <div className="border border-[#E5E5E5] p-5 bg-[#FAF9F5] space-y-3">
-            <div className="flex items-start justify-between">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="text-sm font-bold text-[#1F1F1F]">Job Portal Gateway Integrations</h3>
-                  <span className="text-[10px] font-semibold text-[#745800] bg-[#FFF4CC] px-2 py-0.5">
-                    Authorized API only
-                  </span>
-                </div>
-                <p className="text-xs text-[#666666] pt-1">
-                  Connect supported external recruitment gateways for 1-click ATS application dispatch. Unauthorized scraping is prohibited.
-                </p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
-              <div className="bg-white border border-[#E5E5E5] p-3 space-y-1">
-                <span className="text-xs font-bold text-[#1F1F1F] block">Naukri.com Enterprise ATS</span>
-                <span className="text-[10px] text-emerald-700 font-semibold block">● API Ready</span>
-                <p className="text-[10px] text-[#82877D]">Direct job application gateway</p>
-              </div>
-
-              <div className="bg-white border border-[#E5E5E5] p-3 space-y-1">
-                <span className="text-xs font-bold text-[#1F1F1F] block">Indeed Workday API</span>
-                <span className="text-[10px] text-emerald-700 font-semibold block">● API Ready</span>
-                <p className="text-[10px] text-[#82877D]">Official XML feed & token pipeline</p>
-              </div>
-
-              <div className="bg-white border border-[#E5E5E5] p-3 space-y-1">
-                <span className="text-xs font-bold text-[#1F1F1F] block">Instahyre / Workday</span>
-                <span className="text-[10px] text-[#82877D] font-semibold block">○ Optional</span>
-                <p className="text-[10px] text-[#82877D]">Can link during application step</p>
-              </div>
-            </div>
+          <div className="border border-[#E5E5E5] p-5 bg-[#FAF9F5] text-xs text-[#666666]">
+            Applications are completed on each employer’s website. Direct ATS integrations and application dispatch are not configured.
           </div>
         </div>
 
@@ -349,14 +188,14 @@ export const AccountConnectionsScreen: React.FC<AccountConnectionsScreenProps> =
             <span>Strict Token & Privacy Security</span>
           </div>
           <p className="text-[11px] leading-relaxed">
-            openroles only imports information you authorize. Third-party passwords are never requested or stored. OAuth access tokens are securely managed server-side and never exposed to browser storage. You can disconnect accounts at any time.
+            Third-party credentials are not requested. Account linking and OAuth token handling will remain unavailable until official OAuth flows are configured. You can remove existing connection records at any time.
           </p>
         </div>
 
         {/* Section 22: Continue Button taking user to Terms & Conditions */}
         <div className="flex items-center justify-between pt-4 border-t border-[#E5E5E5]">
           <span className="text-xs text-[#82877D]">
-            Integrations configured: {connectedAccounts.filter((a) => a.status === 'connected').length} active
+            Existing connection records: {connectedAccounts.filter((a) => a.status === 'connected').length}
           </span>
           <button
             type="button"
@@ -369,52 +208,6 @@ export const AccountConnectionsScreen: React.FC<AccountConnectionsScreenProps> =
         </div>
       </div>
 
-      {/* GitHub Username Modal */}
-      {isGitHubModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white border border-[#E5E5E5] w-full max-w-sm p-6 space-y-4 shadow-xl">
-            <h3 className="text-sm font-bold text-[#1F1F1F]">Connect GitHub Technical Profile</h3>
-            <p className="text-xs text-[#666666]">
-              Enter your public GitHub username to import verified repositories, programming languages, and contribution statistics.
-            </p>
-            <div className="space-y-3">
-              <div>
-                <label className="block text-[11px] font-bold text-[#53594F] uppercase mb-1">
-                  GitHub Username
-                </label>
-                <div className="flex items-center border border-[#E5E5E5] px-2.5 py-1.5">
-                  <span className="text-xs text-slate-400 mr-1">github.com/</span>
-                  <input
-                    type="text"
-                    value={gitHubInput}
-                    onChange={(e) => setGitHubInput(e.target.value)}
-                    placeholder="username"
-                    className="w-full text-xs text-[#1F1F1F] focus:outline-none"
-                  />
-                </div>
-              </div>
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsGitHubModalOpen(false)}
-                  className="px-3 py-1.5 border border-[#E5E5E5] text-xs text-[#666666] hover:bg-slate-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleConfirmGitHub}
-                  disabled={isConnecting || !gitHubInput.trim()}
-                  className="px-4 py-1.5 bg-[#1F1F1F] hover:bg-black text-white text-xs font-bold disabled:opacity-50"
-                >
-                  {isConnecting ? 'Importing...' : 'Import Profile'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Disconnect Confirmation Modal (Section 41) */}
       {disconnectConfirm && (
         <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
@@ -424,7 +217,7 @@ export const AccountConnectionsScreen: React.FC<AccountConnectionsScreenProps> =
               Disconnect {disconnectConfirm}?
             </h3>
             <p className="text-xs text-[#666666] leading-relaxed">
-              Are you sure you want to disconnect {disconnectConfirm}? Your existing technical profile and resume data will remain in your profile, but automatic profile sync will be paused.
+              Are you sure you want to remove the saved {disconnectConfirm} connection from your account?
             </p>
             <div className="flex items-center justify-end gap-2 pt-2">
               <button
