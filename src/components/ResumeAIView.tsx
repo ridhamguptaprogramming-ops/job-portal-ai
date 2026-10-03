@@ -18,6 +18,7 @@ import {
 import { ResumeAnalysis, UserProfile } from '../types/job';
 import { SAMPLE_RESUMES } from '../data/mockJobs';
 import { analyzeResumeWithAI } from '../services/geminiService';
+import { api } from '../services/api';
 
 interface ResumeAIViewProps {
   user: UserProfile;
@@ -35,6 +36,7 @@ export const ResumeAIView: React.FC<ResumeAIViewProps> = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStep, setProcessingStep] = useState(0);
   const [uploadFileName, setUploadFileName] = useState('');
+  const [persistenceNotice, setPersistenceNotice] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const processingSteps = [
@@ -47,6 +49,7 @@ export const ResumeAIView: React.FC<ResumeAIViewProps> = ({
 
   const handleStartAnalysis = async (content: string, name: string) => {
     setIsProcessing(true);
+    setPersistenceNotice(null);
     setUploadFileName(name);
     setProcessingStep(0);
 
@@ -60,15 +63,24 @@ export const ResumeAIView: React.FC<ResumeAIViewProps> = ({
 
     try {
       const analysis = await analyzeResumeWithAI(content, name);
+      try {
+        await api.saveResumeAnalysis(name, analysis);
+      } catch (saveError) {
+        console.error('[Resume Storage] Analysis completed but was not saved:', saveError);
+        const message = saveError instanceof Error ? saveError.message : 'Storage is unavailable.';
+        setPersistenceNotice(`Analysis completed, but it was not saved to your account: ${message}`);
+      }
       clearInterval(stepInterval);
       setProcessingStep(processingSteps.length - 1);
       setTimeout(() => {
         setIsProcessing(false);
         onUpdateAnalysis(analysis, name);
       }, 500);
-    } catch {
+    } catch (analysisError) {
       clearInterval(stepInterval);
       setIsProcessing(false);
+      const message = analysisError instanceof Error ? analysisError.message : 'Resume analysis failed.';
+      setPersistenceNotice(message);
     }
   };
 
@@ -198,6 +210,12 @@ export const ResumeAIView: React.FC<ResumeAIViewProps> = ({
           </div>
         </div>
       </div>
+
+      {persistenceNotice && (
+        <div role="alert" className="bg-amber-50 border border-amber-300 rounded-lg p-4 text-sm text-amber-900">
+          {persistenceNotice}
+        </div>
+      )}
 
       {/* Section 13: Processing State Indicator */}
       {isProcessing && (

@@ -128,6 +128,16 @@ export default function App() {
               },
               isOnboarded: isComplete
             };
+            try {
+              const { resume } = await api.getResumeAnalysis();
+              if (resume) {
+                mappedUser.resumeAnalysis = resume.analysis;
+                mappedUser.resumeFileName = resume.fileName;
+                mappedUser.resumeUploadedAt = resume.updatedAt;
+              }
+            } catch (resumeError) {
+              console.warn('[openroles] Could not restore saved resume analysis:', resumeError);
+            }
             setUser(mappedUser);
             setConnectedAccounts(res.connectedAccounts || []);
             setOnboardingStep(res.user.onboardingStep || (isComplete ? 'completed' : 'accounts'));

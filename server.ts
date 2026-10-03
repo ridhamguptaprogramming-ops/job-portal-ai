@@ -6,6 +6,8 @@ import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import { INITIAL_VERIFIED_JOBS, VERIFIED_PROVIDERS } from './src/data/verifiedJobs';
 import { resolveCompany, VERIFIED_COMPANIES } from './src/services/companyLogoService';
+import { RequestAuthError, verifyFirebaseBearerToken } from './src/services/firebaseAdmin';
+import { getResumeAnalysesCollection } from './src/services/mongodb';
 
 dotenv.config();
 
@@ -466,62 +468,82 @@ ${resumeText.slice(0, 10000)}
     }
   }
 
-  // Fallback response if AI is not available
-  return res.json({
-    id: 'analysis-' + Date.now(),
-    candidateName: 'Rahul Sharma',
-    currentRole: 'Backend Developer',
-    experienceLevel: 'mid',
-    yearsOfExperience: 4,
-    location: 'Bengaluru, India',
-    summary: 'Backend Developer with 4 years of experience building high-throughput REST APIs and PostgreSQL database services.',
-    skills: {
-      programmingLanguages: ['Python', 'SQL', 'JavaScript', 'Bash'],
-      backend: ['FastAPI', 'Django', 'REST API', 'SQLAlchemy', 'Celery'],
-      frontend: ['HTML5', 'CSS3', 'React'],
-      databases: ['PostgreSQL', 'Redis', 'MySQL'],
-      cloudAndDevOps: ['Docker', 'AWS', 'Git', 'Linux'],
-      toolsAndFrameworks: ['PyTest', 'Postman', 'GitHub Actions'],
-      softSkills: ['Problem Solving', 'System Design', 'Code Reviews']
-    },
-    allSkills: ['Python', 'FastAPI', 'PostgreSQL', 'Docker', 'Redis', 'REST API', 'SQLAlchemy', 'Git', 'AWS'],
-    experience: [
-      {
-        company: 'NexaFin Technologies',
-        role: 'Backend Developer',
-        location: 'Bengaluru, India',
-        startDate: '2023',
-        endDate: 'Present',
-        description: [
-          'Engineered 15+ microservices in Python & FastAPI serving 3M+ daily requests.',
-          'Optimized PostgreSQL queries, dropping P95 latency by 45%.'
-        ]
+  return res.status(503).json({ error: 'AI resume analysis is temporarily unavailable.' });
+});
+
+app.get('/api/resumes/analysis', async (req: Request, res: Response) => {
+  let firebaseUid: string;
+  try {
+    firebaseUid = await verifyFirebaseBearerToken(req.headers.authorization);
+  } catch (error) {
+    if (error instanceof RequestAuthError) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
+    console.error('[Resume Storage] Firebase token verification failed:', error);
+    return res.status(503).json({ error: 'Resume storage authentication is unavailable.' });
+  }
+
+  try {
+    const collection = await getResumeAnalysesCollection();
+    const savedResume = await collection.findOne({ _id: firebaseUid });
+    if (!savedResume) return res.json({ resume: null });
+
+    return res.json({
+      resume: {
+        fileName: savedResume.fileName,
+        analysis: savedResume.analysis,
+        updatedAt: savedResume.updatedAt
       }
-    ],
-    education: [
-      {
-        institution: 'National Institute of Technology',
-        degree: 'B.Tech in Computer Science',
-        graduationYear: '2021'
-      }
-    ],
-    projects: [
-      {
-        title: 'FinScale API Gateway',
-        description: 'FastAPI token bucket rate limiter and caching layer.',
-        technologies: ['FastAPI', 'Redis', 'Docker']
-      }
-    ],
-    recommendedRoles: ['Backend Developer', 'Python Developer', 'Software Engineer', 'API Platform Engineer'],
-    insights: {
-      completenessScore: 84,
-      strongSkills: ['Python', 'FastAPI', 'PostgreSQL', 'REST API'],
-      missingSkills: ['Kubernetes', 'Terraform', 'Kafka'],
-      careerTrajectory: 'Target Senior Backend Engineer and Platform Architect opportunities.',
-      suggestions: ['Add your GitHub repository links to demonstrate production-grade architecture.']
-    },
-    analyzedAt: new Date().toISOString()
-  });
+    });
+  } catch (error) {
+    console.error('[Resume Storage] Could not load saved resume analysis:', error);
+    return res.status(503).json({ error: 'Saved resume analysis is temporarily unavailable.' });
+  }
+});
+
+app.put('/api/resumes/analysis', async (req: Request, res: Response) => {
+  let firebaseUid: string;
+  try {
+    firebaseUid = await verifyFirebaseBearerToken(req.headers.authorization);
+  } catch (error) {
+    if (error instanceof RequestAuthError) {
+      return res.status(error.statusCode).json({ error: error.message });
+    }
+    console.error('[Resume Storage] Firebase token verification failed:', error);
+    return res.status(503).json({ error: 'Resume storage authentication is unavailable.' });
+  }
+
+  const { fileName, analysis } = req.body || {};
+  if (typeof fileName !== 'string' || !fileName.trim()) {
+    return res.status(400).json({ error: 'fileName is required.' });
+  }
+  if (!analysis || typeof analysis !== 'object' || Array.isArray(analysis)) {
+    return res.status(400).json({ error: 'analysis must be a JSON object.' });
+  }
+
+  const analysisJson = JSON.stringify(analysis);
+  if (Buffer.byteLength(analysisJson, 'utf8') > 256 * 1024) {
+    return res.status(413).json({ error: 'Resume analysis exceeds the 256 KB storage limit.' });
+  }
+
+  const safeFileName = fileName.trim().replace(/\\/g, '/').split('/').pop()?.slice(0, 255);
+  if (!safeFileName) {
+    return res.status(400).json({ error: 'fileName is invalid.' });
+  }
+
+  const updatedAt = new Date();
+  try {
+    const collection = await getResumeAnalysesCollection();
+    await collection.replaceOne(
+      { _id: firebaseUid },
+      { _id: firebaseUid, fileName: safeFileName, analysis, updatedAt },
+      { upsert: true }
+    );
+    return res.json({ saved: true, fileName: safeFileName, updatedAt: updatedAt.toISOString() });
+  } catch (error) {
+    console.error('[Resume Storage] Could not save resume analysis:', error);
+    return res.status(503).json({ error: 'Resume analysis could not be saved. Try again later.' });
+  }
 });
 
 // Helper to normalize job representation for both openroles frontend and standard APIs

@@ -7,7 +7,7 @@
  * - Logs technical error to console.error()
  */
 
-import { Job } from '../types/job';
+import { Job, ResumeAnalysis } from '../types/job';
 import { resolveCompany } from './companyLogoService';
 
 export const PRIMARY_RENDER_BACKEND = 'https://job-portal-fastapi.onrender.com';
@@ -408,6 +408,22 @@ class ApiService {
       body: JSON.stringify({ id_token: idToken, name }),
     });
     return res;
+  }
+
+  public async saveResumeAnalysis(
+    fileName: string,
+    analysis: ResumeAnalysis
+  ): Promise<{ saved: boolean; fileName: string; updatedAt: string }> {
+    return this.request('/api/resumes/analysis', {
+      method: 'PUT',
+      body: JSON.stringify({ fileName, analysis })
+    });
+  }
+
+  public async getResumeAnalysis(): Promise<{
+    resume: { fileName: string; analysis: ResumeAnalysis; updatedAt: string } | null;
+  }> {
+    return this.request('/api/resumes/analysis');
   }
 
   /**
