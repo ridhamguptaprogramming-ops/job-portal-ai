@@ -5,7 +5,8 @@ import {
   loginWithEmail,
   registerWithEmail,
   refreshCurrentFirebaseUser,
-  resendCurrentEmailVerification
+  resendCurrentEmailVerification,
+  signOutFirebase
 } from '../services/firebase';
 
 interface AuthModalProps {
@@ -67,6 +68,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       }
     } catch (err: any) {
       setErrorMessage(err.message || 'Authentication could not be completed.');
+      if (err.code === 'auth/email-already-in-use') {
+        setMode('login');
+        setEmail(email.trim());
+        setSuccessMessage('An account already exists with this email. Sign in instead; no duplicate account was created.');
+      } else if (err.code === 'account_conflict') {
+        await signOutFirebase();
+        setMode('login');
+        setEmail(email.trim());
+        setSuccessMessage('This email is attached to another Firebase account. Sign in using its existing provider; no account was merged.');
+      }
     } finally {
       setIsLoading(false);
     }

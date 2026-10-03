@@ -19,7 +19,7 @@ import {
   sendPasswordReset,
   refreshCurrentFirebaseUser,
   resendCurrentEmailVerification,
-  FirebaseAuthFlowError
+  signOutFirebase
 } from '../services/firebase';
 
 interface AuthScreenProps {
@@ -175,6 +175,13 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         setMode('signin');
         setEmail(email.trim());
         setSuccessNotice('An account already exists with this email. Sign in instead; no duplicate account was created.');
+      } else if (err.code === 'account_conflict') {
+        await signOutFirebase();
+        setMode('signin');
+        setEmail(email.trim());
+        setSuccessNotice(
+          'This email belongs to a different Firebase account. We did not merge or change accounts. Sign in with the original provider, then link Google from that signed-in account.'
+        );
       }
     } finally {
       setIsLoading(false);

@@ -143,12 +143,14 @@ export function normalizeJob(raw: any): Job {
 export class JobServiceError extends Error {
   public status: number;
   public technicalUrl: string;
+  public code?: string;
 
-  constructor(message: string, status: number = 0, technicalUrl: string = '') {
+  constructor(message: string, status: number = 0, technicalUrl: string = '', code?: string) {
     super(message);
     this.name = 'JobServiceError';
     this.status = status;
     this.technicalUrl = technicalUrl;
+    this.code = code;
   }
 }
 
@@ -262,9 +264,13 @@ class ApiService {
 
       if (!response.ok) {
         const errorJson = await response.json().catch(() => ({}));
-        const detailMsg = errorJson.detail || errorJson.error || `Request failed with status ${response.status}`;
+        const detail = errorJson.detail;
+        const detailMsg = typeof detail === 'string'
+          ? detail
+          : detail?.message || errorJson.error || `Request failed with status ${response.status}`;
+        const errorCode = typeof detail === 'object' ? detail?.code : errorJson.code;
         console.error(`[JobService API Error] ${options.method || 'GET'} ${url}`, response.status, detailMsg);
-        throw new JobServiceError(detailMsg, response.status, url);
+        throw new JobServiceError(detailMsg, response.status, url, errorCode);
       }
 
       return (await response.json()) as T;
@@ -378,11 +384,10 @@ class ApiService {
   /**
    * Section 7, 8, 33: Authenticate with verified Firebase ID Token
    */
-  public async verifyFirebaseLogin(idToken: string, name?: string): Promise<any> {
+  public async verifyFirebaseLogin(idToken: string): Promise<any> {
     this.setToken(idToken);
     const res = await this.request<any>('/api/auth/firebase-verify', {
       method: 'POST',
-      body: JSON.stringify({ id_token: idToken, name }),
     }, AUTH_API_URL);
     return res;
   }

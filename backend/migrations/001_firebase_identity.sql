@@ -17,6 +17,10 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+ALTER TABLE users ALTER COLUMN firebase_uid TYPE VARCHAR(128);
+ALTER TABLE users ALTER COLUMN firebase_uid SET NOT NULL;
+UPDATE users SET email = LOWER(email);
+
 CREATE INDEX IF NOT EXISTS ix_users_firebase_uid ON users (firebase_uid);
 CREATE INDEX IF NOT EXISTS ix_users_email ON users (email);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_users_email_case_insensitive ON users (LOWER(email));

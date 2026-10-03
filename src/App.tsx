@@ -70,7 +70,7 @@ export default function App() {
         if (!firebaseUser.emailVerified) return;
         try {
           const token = await firebaseUser.getIdToken();
-          const res = await api.verifyFirebaseLogin(token, firebaseUser.displayName || undefined);
+          const res = await api.verifyFirebaseLogin(token);
           if (res && res.user) {
             const isComplete = Boolean(res.user.onboardingCompleted ?? res.user.onboarding_completed);
             const mappedUser: UserProfile = {
@@ -216,7 +216,7 @@ export default function App() {
   // Section 7, 8, 33: Firebase Auth Success & PostgreSQL Session Sync
   const handleFirebaseAuthSuccess = async (firebaseUser: any, token: string) => {
     try {
-      const res = await api.verifyFirebaseLogin(token, firebaseUser.displayName || undefined);
+      const res = await api.verifyFirebaseLogin(token);
       if (res && res.user) {
         const isComplete = Boolean(res.user.onboardingCompleted);
         const mappedUser: UserProfile = {

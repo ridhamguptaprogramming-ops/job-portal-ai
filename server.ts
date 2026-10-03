@@ -858,15 +858,6 @@ function parseFirebaseToken(authHeader?: string): { uid: string; email: string; 
     };
   }
   const token = authHeader.split('Bearer ')[1].trim();
-  if (token === 'demo-firebase-token-alex-morgan') {
-    return {
-      uid: defaultUser.firebaseUid,
-      email: defaultUser.email,
-      name: defaultUser.name,
-      picture: defaultUser.photoUrl,
-      emailVerified: true
-    };
-  }
   try {
     const parts = token.split('.');
     if (parts.length >= 2) {
@@ -1039,8 +1030,8 @@ app.post('/api/integrations/github/connect', requireFirebaseAuth, async (req: Re
   const { username } = req.body;
   if (!username) return res.status(400).json({ error: 'Username required' });
 
-  const claims = parseFirebaseToken(req.headers.authorization);
-  const user = usersStore.get(claims.uid) || userFromVerifiedClaims(getVerifiedClaims(req));
+  const claims = getVerifiedClaims(req);
+  const user = userFromVerifiedClaims(claims);
 
   // Query real GitHub public API
   let profileData: any = {
@@ -1091,8 +1082,8 @@ app.post('/api/integrations/github/connect', requireFirebaseAuth, async (req: Re
 });
 
 app.post('/api/integrations/github/disconnect', requireFirebaseAuth, (req: Request, res: Response) => {
-  const claims = parseFirebaseToken(req.headers.authorization);
-  const user = usersStore.get(claims.uid) || userFromVerifiedClaims(getVerifiedClaims(req));
+  const claims = getVerifiedClaims(req);
+  const user = userFromVerifiedClaims(claims);
   const conns = connectedAccountsStore.get(user.id) || [];
   connectedAccountsStore.set(user.id, conns.filter(c => c.provider !== 'github'));
   res.json({ success: true, message: 'GitHub account disconnected.' });
@@ -1100,8 +1091,8 @@ app.post('/api/integrations/github/disconnect', requireFirebaseAuth, (req: Reque
 
 // Section 11, 12, 13: LinkedIn Connection Endpoint
 app.post('/api/integrations/linkedin/connect', requireFirebaseAuth, (req: Request, res: Response) => {
-  const claims = parseFirebaseToken(req.headers.authorization);
-  const user = usersStore.get(claims.uid) || userFromVerifiedClaims(getVerifiedClaims(req));
+  const claims = getVerifiedClaims(req);
+  const user = userFromVerifiedClaims(claims);
 
   const account = {
     id: 'conn-li-' + Date.now(),
@@ -1127,8 +1118,8 @@ app.post('/api/integrations/linkedin/connect', requireFirebaseAuth, (req: Reques
 });
 
 app.post('/api/integrations/linkedin/disconnect', requireFirebaseAuth, (req: Request, res: Response) => {
-  const claims = parseFirebaseToken(req.headers.authorization);
-  const user = usersStore.get(claims.uid) || userFromVerifiedClaims(getVerifiedClaims(req));
+  const claims = getVerifiedClaims(req);
+  const user = userFromVerifiedClaims(claims);
   const conns = connectedAccountsStore.get(user.id) || [];
   connectedAccountsStore.set(user.id, conns.filter(c => c.provider !== 'linkedin'));
   res.json({ success: true, message: 'LinkedIn account disconnected.' });

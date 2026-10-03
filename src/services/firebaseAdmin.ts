@@ -49,7 +49,7 @@ function getFirebaseAdminAuth() {
 export async function verifyFirebaseBearerClaims(authorization: string | undefined): Promise<DecodedIdToken> {
   const match = authorization?.match(/^Bearer\s+(.+)$/i);
   if (!match) {
-    throw new RequestAuthError('A valid Firebase sign-in is required to access resume storage.', 401);
+    throw new RequestAuthError('A valid Firebase sign-in is required for this endpoint.', 401);
   }
 
   try {

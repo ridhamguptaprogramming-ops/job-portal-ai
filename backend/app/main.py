@@ -4,9 +4,10 @@ from typing import List, Optional, Any, Dict
 from fastapi import FastAPI, HTTPException, Depends, status, UploadFile, File, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 from .core.config import settings
-from .services.firebase_auth import verify_firebase_id_token, get_current_firebase_user
+from .services.firebase_auth import get_current_firebase_user
 from .services.user_repository import (
     complete_user_onboarding,
     get_or_create_firebase_user,
@@ -291,10 +292,6 @@ class RegisterPayload(BaseModel):
     password: str
     name: Optional[str] = None
 
-class FirebaseVerifyPayload(BaseModel):
-    id_token: str
-    name: Optional[str] = None
-
 class OnboardingCompletePayload(BaseModel):
     terms_agreed: bool
     terms_version: str = "2026-10-01"
@@ -532,13 +529,14 @@ def unsave_job(job_id: str):
 CONNECTED_ACCOUNTS_DB: Dict[str, List[Dict[str, Any]]] = {}
 
 @app.post("/api/auth/firebase-verify")
-async def verify_firebase_login(payload: FirebaseVerifyPayload, request: Request):
+def verify_firebase_login(
+    token_claims: Dict[str, Any] = Depends(get_current_firebase_user),
+):
     """
     Section 7, 8, 33: Authenticates via verified Firebase ID Token.
     Extracts verified UID, email, provider from the token itself (never trusts browser JSON).
     Synchronizes user idempotently into PostgreSQL.
     """
-    token_claims = await verify_firebase_id_token(payload.id_token)
     uid = token_claims["uid"]
     user = get_or_create_firebase_user(token_claims)
     conns = CONNECTED_ACCOUNTS_DB.setdefault(user["id"], [])
@@ -567,7 +565,7 @@ async def verify_firebase_login(payload: FirebaseVerifyPayload, request: Request
     }
 
 @app.get("/api/auth/me")
-async def get_me(current_claims: Dict[str, Any] = Depends(get_current_firebase_user)):
+def get_me(current_claims: Dict[str, Any] = Depends(get_current_firebase_user)):
     """
     Section 38: Protected endpoint verifying Bearer Firebase token.
     Extracts verified UID and returns current user from PostgreSQL.
@@ -621,7 +619,7 @@ def get_legal_documents():
     }
 
 @app.post("/api/onboarding/complete")
-async def complete_onboarding(
+def complete_onboarding(
     payload: OnboardingCompletePayload,
     request: Request,
     current_claims: Dict[str, Any] = Depends(get_current_firebase_user)
@@ -671,7 +669,7 @@ async def complete_onboarding(
 # ================= INTEGRATIONS & CONNECTED ACCOUNTS =================
 
 @app.get("/api/integrations/status")
-async def get_integrations_status(current_claims: Dict[str, Any] = Depends(get_current_firebase_user)):
+def get_integrations_status(current_claims: Dict[str, Any] = Depends(get_current_firebase_user)):
     """Section 21: Returns connection status for LinkedIn, GitHub, and job portals."""
     uid = current_claims["uid"]
     user = get_user_by_firebase_uid(uid)
@@ -688,7 +686,7 @@ async def connect_github(
 ):
     """Section 14, 15, 16: Connects GitHub and imports verified public profile & repositories."""
     uid = current_claims["uid"]
-    user = get_user_by_firebase_uid(uid)
+    user = await run_in_threadpool(get_user_by_firebase_uid, uid)
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
 
@@ -754,7 +752,7 @@ async def connect_github(
     return {"success": True, "connected_account": conns[-1]}
 
 @app.post("/api/integrations/github/disconnect")
-async def disconnect_github(current_claims: Dict[str, Any] = Depends(get_current_firebase_user)):
+def disconnect_github(current_claims: Dict[str, Any] = Depends(get_current_firebase_user)):
     """Section 41: Disconnects GitHub account cleanly without wiping core user profile."""
     uid = current_claims["uid"]
     user = get_user_by_firebase_uid(uid)
@@ -765,7 +763,7 @@ async def disconnect_github(current_claims: Dict[str, Any] = Depends(get_current
     return {"success": True, "message": "GitHub disconnected."}
 
 @app.post("/api/integrations/linkedin/connect")
-async def connect_linkedin(
+def connect_linkedin(
     payload: ConnectLinkedInPayload,
     current_claims: Dict[str, Any] = Depends(get_current_firebase_user)
 ):
@@ -806,7 +804,7 @@ async def connect_linkedin(
     return {"success": True, "connected_account": conns[-1]}
 
 @app.post("/api/integrations/linkedin/disconnect")
-async def disconnect_linkedin(current_claims: Dict[str, Any] = Depends(get_current_firebase_user)):
+def disconnect_linkedin(current_claims: Dict[str, Any] = Depends(get_current_firebase_user)):
     """Section 41: Disconnects LinkedIn account cleanly."""
     uid = current_claims["uid"]
     user = get_user_by_firebase_uid(uid)
