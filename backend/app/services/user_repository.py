@@ -1,5 +1,6 @@
 import os
 from datetime import datetime
+from threading import Lock
 from typing import Any, Dict, Optional
 
 from fastapi import HTTPException, status
@@ -10,25 +11,28 @@ from sqlalchemy.orm import Session, sessionmaker
 from ..models.models import User, UserConsent
 
 _session_factory = None
+_session_factory_lock = Lock()
 
 
 def _sessions() -> sessionmaker[Session]:
     global _session_factory
     if _session_factory is None:
-        database_url = os.getenv("DATABASE_URL", "").strip()
-        if not database_url:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="User storage is not configured.",
-            )
-        try:
-            engine = create_engine(database_url, pool_pre_ping=True)
-            _session_factory = sessionmaker(bind=engine, expire_on_commit=False)
-        except (SQLAlchemyError, ValueError) as exc:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="User storage could not be initialized.",
-            ) from exc
+        with _session_factory_lock:
+            if _session_factory is None:
+                database_url = os.getenv("DATABASE_URL", "").strip()
+                if not database_url:
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail="User storage is not configured.",
+                    )
+                try:
+                    engine = create_engine(database_url, pool_pre_ping=True)
+                    _session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+                except (SQLAlchemyError, ValueError) as exc:
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail="User storage could not be initialized.",
+                    ) from exc
     return _session_factory
 
 
@@ -77,9 +81,15 @@ def get_or_create_firebase_user(claims: Dict[str, Any]) -> Dict[str, Any]:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Verify your email address before creating or accessing an account.",
         )
+    if len(email) > 255:
+        raise HTTPException(status_code=400, detail="The verified email address is too long.")
 
-    display_name = (claims.get("display_name") or "").strip() or email.split("@", maxsplit=1)[0]
+    display_name = (claims.get("display_name") or "").strip()[:255] or email.split("@", maxsplit=1)[0]
     photo_url = claims.get("photo_url")
+    if not isinstance(photo_url, str):
+        photo_url = None
+    else:
+        photo_url = photo_url[:512]
     sessions = _sessions()
     try:
         with sessions.begin() as session:

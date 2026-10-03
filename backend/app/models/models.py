@@ -11,7 +11,8 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     UniqueConstraint,
-    Enum as SQLEnum
+    Enum as SQLEnum,
+    func,
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import declarative_base, relationship
@@ -46,6 +47,10 @@ class User(Base):
     notifications = relationship("Notification", back_populates="user")
     connected_accounts = relationship("ConnectedAccount", back_populates="user", cascade="all, delete-orphan")
     consents = relationship("UserConsent", back_populates="user", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("uq_users_email_case_insensitive", func.lower(email), unique=True),
+    )
 
 class Profile(Base):
     __tablename__ = "profiles"

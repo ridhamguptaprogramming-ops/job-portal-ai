@@ -537,7 +537,6 @@ def verify_firebase_login(
     Extracts verified UID, email, provider from the token itself (never trusts browser JSON).
     Synchronizes user idempotently into PostgreSQL.
     """
-    uid = token_claims["uid"]
     user = get_or_create_firebase_user(token_claims)
     conns = CONNECTED_ACCOUNTS_DB.setdefault(user["id"], [])
     step = "completed" if user["onboarding_completed"] else ("terms" if conns else "accounts")

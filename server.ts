@@ -809,77 +809,14 @@ const usersStore: Map<string, UserRecord> = new Map();
 const connectedAccountsStore: Map<string, any[]> = new Map();
 const consentsStore: any[] = [];
 
-// Seed default verified user
-const defaultUser: UserRecord = {
-  id: 'usr-alex-morgan',
-  firebaseUid: 'fb-alex-morgan-prod',
-  email: 'candidate@openroles.example',
-  emailVerified: true,
-  name: 'Alex Morgan',
-  displayName: 'Alex Morgan',
-  photoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100',
-  headline: 'Software Engineer & Backend Developer',
-  location: 'Bengaluru, India',
-  about: 'Software engineer passionate about scalable backend architectures in Python, FastAPI, and PostgreSQL.',
-  onboardingCompleted: true,
-  termsAccepted: true,
-  termsVersion: '2026-10-01',
-  termsAcceptedAt: new Date().toISOString(),
-  lastLoginAt: new Date().toISOString()
-};
-usersStore.set(defaultUser.id, defaultUser);
-usersStore.set(defaultUser.firebaseUid, defaultUser);
-connectedAccountsStore.set(defaultUser.id, [
-  {
-    id: 'conn-gh-1',
-    provider: 'github',
-    providerUsername: 'ridhamgupta805',
-    status: 'connected',
-    connectedAt: new Date().toISOString(),
-    lastSyncedAt: new Date().toISOString(),
-    summary: {
-      name: 'Ridham Gupta',
-      reposCount: 18,
-      topSkills: ['Python', 'FastAPI', 'PostgreSQL', 'Docker', 'TypeScript'],
-      bio: 'Software engineer candidate on openroles'
-    }
-  }
-]);
-
-// Helper to safely extract verified claims from Firebase ID Token
-function parseFirebaseToken(authHeader?: string): { uid: string; email: string; name?: string; picture?: string; emailVerified?: boolean } {
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return {
-      uid: defaultUser.firebaseUid,
-      email: defaultUser.email,
-      name: defaultUser.name,
-      picture: defaultUser.photoUrl,
-      emailVerified: true
-    };
-  }
-  const token = authHeader.split('Bearer ')[1].trim();
-  try {
-    const parts = token.split('.');
-    if (parts.length >= 2) {
-      const payloadJson = Buffer.from(parts[1], 'base64').toString('utf8');
-      const payload = JSON.parse(payloadJson);
-      return {
-        uid: payload.user_id || payload.sub || `fb-${token.slice(0, 10)}`,
-        email: payload.email || 'candidate@openroles.example',
-        name: payload.name || (payload.email ? payload.email.split('@')[0] : 'Candidate'),
-        picture: payload.picture,
-        emailVerified: Boolean(payload.email_verified)
-      };
-    }
-  } catch (e) {
-    // fallback
-  }
-  return {
-    uid: `fb-${token.slice(0, 10)}`,
-    email: 'candidate@openroles.example',
-    name: 'Candidate',
-    emailVerified: false
-  };
+function parseFirebaseToken(_authHeader?: string): {
+  uid: string;
+  email: string;
+  name?: string;
+  picture?: string;
+  emailVerified?: boolean;
+} {
+  throw new RequestAuthError('Legacy token parsing is disabled; use the FastAPI authentication service.', 410);
 }
 
 // Firebase identity and onboarding are owned by the PostgreSQL-backed FastAPI service.
