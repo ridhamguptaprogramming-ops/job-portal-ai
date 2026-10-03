@@ -90,8 +90,12 @@ export const JobCard: React.FC<JobCardProps> = ({
                   <ExternalLink className="w-3 h-3" />
                 </a>
               )}
-              <span className="text-slate-300">•</span>
-              <span className="text-xs text-slate-500">{job.industry || 'Technology'}</span>
+              {job.industry && (
+                <>
+                  <span className="text-slate-300">•</span>
+                  <span className="text-xs text-slate-500">{job.industry}</span>
+                </>
+              )}
             </div>
 
             {/* Meta attributes: Location, Work mode, Salary, Experience */}
@@ -110,7 +114,11 @@ export const JobCard: React.FC<JobCardProps> = ({
                     : 'bg-slate-50 text-slate-700 border-slate-200'
                 }`}
               >
-                {job.remoteType}
+                {job.remoteType === 'unspecified'
+                  ? 'Work mode not specified'
+                  : job.remoteType === 'onsite'
+                    ? 'On-site'
+                    : job.remoteType}
               </span>
 
               <span className="font-semibold text-slate-800 bg-slate-100 px-2 py-0.5 rounded text-[11px]">
@@ -120,7 +128,9 @@ export const JobCard: React.FC<JobCardProps> = ({
               <span className="capitalize text-slate-600">
                 {isInternship
                   ? job.internshipDetails?.duration || 'Internship Term'
-                  : `${job.experienceLevel} Level`}
+                  : job.experienceLevel === 'unspecified'
+                    ? 'Experience not specified'
+                    : `${job.experienceLevel} Level`}
               </span>
             </div>
           </div>

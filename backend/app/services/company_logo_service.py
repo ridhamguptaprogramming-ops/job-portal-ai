@@ -407,8 +407,8 @@ class CompanyLogoService:
             "logo_source": source,
             "website_url": provided_website,
             "domain": provided_website.replace("https://", "").replace("http://", "").split("/")[0] if provided_website else None,
-            "description": f"{norm['name']} is an active verified employer on openroles.",
-            "industry": "Technology",
+            "description": None,
+            "industry": None,
             "headquarters": None,
             "verified": False
         }

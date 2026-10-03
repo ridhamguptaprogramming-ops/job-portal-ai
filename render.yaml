@@ -2,6 +2,7 @@ services:
   - type: web
     name: job-portal-fastapi
     env: python
+    healthCheckPath: /health
     buildCommand: pip install -r backend/requirements.txt
     startCommand: uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT
     envVars:
@@ -9,6 +10,10 @@ services:
         value: 3.11.8
       - key: PORT
         value: 8000
+      - key: FIREBASE_PROJECT_ID
+        value: job-portal-ai-818f8
+      - key: CORS_ORIGINS
+        value: '["https://job-portal-ai-one.vercel.app"]'
       - key: DATABASE_URL
         fromDatabase:
           name: openroles-db

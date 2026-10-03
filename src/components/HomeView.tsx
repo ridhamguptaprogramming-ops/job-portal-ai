@@ -24,6 +24,7 @@ interface HomeViewProps {
   savedJobIds: Set<string>;
   user: UserProfile | null;
   onSaveToggle: (jobId: string) => void;
+  onJobsLoaded?: (jobs: Job[]) => void;
   onSelectJob: (job: Job) => void;
   onQuickApply: (job: Job) => void;
   onSearchSubmit?: (query: string, location: string) => void;
@@ -36,6 +37,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   savedJobIds,
   user,
   onSaveToggle,
+  onJobsLoaded,
   onSelectJob,
   onQuickApply,
   onNavigate
@@ -91,10 +93,28 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
       setActiveJobs(response.jobs);
       setTotalCount(response.total);
+      onJobsLoaded?.(response.jobs);
     } catch (err: any) {
       console.error('[openroles] Failed to fetch live jobs from backend:', err);
-      // Section 19: Keep message user-friendly without technical URLs
-      setApiError("We couldn't reach the job service right now.");
+      if (err instanceof JobServiceError) {
+        if (err.code === 'timeout') {
+          setApiError('The job service is taking too long to respond. Please try again.');
+        } else if (err.status === 401) {
+          setApiError('Sign in to view jobs for your account.');
+        } else if (err.status === 403) {
+          setApiError('You do not have permission to view these jobs.');
+        } else if (err.status === 404) {
+          setApiError('The job service endpoint could not be found. Please contact support.');
+        } else if (err.status >= 500) {
+          setApiError('The job service is temporarily unavailable. Please try again shortly.');
+        } else if (err.status === 0) {
+          setApiError("We couldn't reach the job service right now.");
+        } else {
+          setApiError(err.message);
+        }
+      } else {
+        setApiError('An unexpected error occurred while loading jobs.');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -108,7 +128,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
     skillsFilter,
     companyFilter,
     minSalary,
-    maxSalary
+    maxSalary,
+    onJobsLoaded,
   ]);
 
   // Initial load
@@ -457,7 +478,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               </div>
               <h3 className="text-lg font-semibold text-[#1F1F1F]">Unable to load jobs</h3>
               <p className="text-xs text-[#666666] max-w-sm mx-auto">
-                We couldn't reach the job service right now.
+                {apiError}
               </p>
               {/* SECTION 20: RETRY BUTTON */}
               <div className="pt-2">
@@ -496,7 +517,13 @@ export const HomeView: React.FC<HomeViewProps> = ({
               {activeJobs.map((job, idx) => {
                 const isSaved = savedJobIds.has(job.id);
                 const match = matchMap[job.id];
-                const workplaceBadge = job.remoteType === 'remote' ? 'Remote' : (job.remoteType === 'hybrid' ? 'Hybrid' : 'On-site');
+                const workplaceBadge = job.remoteType === 'unspecified'
+                  ? 'Work mode not specified'
+                  : job.remoteType === 'remote'
+                    ? 'Remote'
+                    : job.remoteType === 'hybrid'
+                      ? 'Hybrid'
+                      : 'On-site';
 
                 return (
                   <article
@@ -518,7 +545,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                         <div className="flex items-center gap-2 text-[11px] text-[#82877D]">
                           <span className="font-semibold text-[#53594F]">{job.company}</span>
                           <span className="text-[#BABDB5]">·</span>
-                          <span>{job.postedAgo || 'Recently posted'}</span>
+                          {job.postedAgo && <span>{job.postedAgo}</span>}
                           {job.isVerifiedSource && (
                             <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-[#745800] bg-[#FFF4CC] px-1.5 py-0.2 rounded">
                               <ShieldCheck className="w-2.5 h-2.5 text-[#B18A08]" />
@@ -560,7 +587,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                     {/* Right: Salary & Actions */}
                     <div className="flex sm:flex-col items-center sm:items-end justify-between w-full sm:w-auto gap-3 pt-1">
                       <span className="text-xs font-semibold text-[#53594F] whitespace-nowrap">
-                        {job.salaryFormatted || 'Market competitive'}
+                        {job.salaryFormatted || 'Not specified by employer'}
                       </span>
 
                       <div className="flex items-center gap-2">

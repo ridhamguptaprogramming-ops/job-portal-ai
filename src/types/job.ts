@@ -1,5 +1,5 @@
-export type RemoteType = 'remote' | 'hybrid' | 'onsite';
-export type ExperienceLevel = 'entry' | 'mid' | 'senior' | 'lead' | 'executive';
+export type RemoteType = 'remote' | 'hybrid' | 'onsite' | 'unspecified';
+export type ExperienceLevel = 'entry' | 'mid' | 'senior' | 'lead' | 'executive' | 'unspecified';
 export type EmploymentType =
   | 'full-time'
   | 'part-time'
@@ -7,7 +7,8 @@ export type EmploymentType =
   | 'contract'
   | 'apprenticeship'
   | 'fellowship'
-  | 'graduate';
+  | 'graduate'
+  | 'other';
 export type ApplicationStatus =
   | 'draft'
   | 'saved'

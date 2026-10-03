@@ -10,7 +10,9 @@
 import { Job, ResumeAnalysis } from '../types/job';
 import { resolveCompany } from './companyLogoService';
 
-export const PRIMARY_RENDER_BACKEND = 'https://job-portal-fastapi.onrender.com';
+export const PRIMARY_RENDER_BACKEND = (
+  import.meta.env.VITE_API_URL || 'https://job-portal-fastapi.onrender.com'
+).replace(/\/$/, '');
 export const LOCAL_SERVER_BACKEND = '';
 const AUTH_API_URL = import.meta.env.VITE_AUTH_API_URL || PRIMARY_RENDER_BACKEND;
 
@@ -70,12 +72,18 @@ function parseList(val: unknown): string[] {
  */
 export function normalizeJob(raw: any): Job {
   if (!raw) return {} as Job;
-  const workplace = (raw.workplace || raw.remote_type || raw.remoteType || 'Remote').toString().toLowerCase();
-  const remoteType = workplace.includes('remote') ? 'remote' : (workplace.includes('hybrid') ? 'hybrid' : 'onsite');
-  const empRaw = (raw.employment_type || raw.employmentType || 'full-time').toString().toLowerCase();
-  const employmentType = ['full-time', 'part-time', 'contract', 'internship'].includes(empRaw) ? empRaw : 'full-time';
-  const expRaw = (raw.experience_level || raw.experienceLevel || 'mid').toString().toLowerCase();
-  const experienceLevel = ['entry', 'mid', 'senior', 'lead', 'director'].includes(expRaw) ? expRaw : 'mid';
+  const workplace = (raw.workplace || raw.remote_type || raw.remoteType || '').toString().toLowerCase();
+  const remoteType = workplace.includes('remote')
+    ? 'remote'
+    : workplace.includes('hybrid')
+      ? 'hybrid'
+      : workplace.includes('site')
+        ? 'onsite'
+        : 'unspecified';
+  const empRaw = (raw.employment_type || raw.employmentType || '').toString().toLowerCase();
+  const employmentType = ['full-time', 'part-time', 'contract', 'internship', 'apprenticeship', 'fellowship', 'graduate'].includes(empRaw) ? empRaw : 'other';
+  const expRaw = (raw.experience_level || raw.experienceLevel || '').toString().toLowerCase();
+  const experienceLevel = ['entry', 'mid', 'senior', 'lead', 'director', 'executive'].includes(expRaw) ? expRaw : 'unspecified';
 
   // Extract skills safely
   let skills: string[] = [];
@@ -88,7 +96,7 @@ export function normalizeJob(raw: any): Job {
   // Extract company safely (handles string or company object)
   const rawCompanyName = typeof raw.company === 'object' && raw.company?.name
     ? raw.company.name
-    : (typeof raw.company === 'string' && raw.company ? raw.company : (raw.company_name || 'Enterprise Partner'));
+    : (typeof raw.company === 'string' && raw.company ? raw.company : (raw.company_name || ''));
   const rawCompanyLogo = (typeof raw.company === 'object' ? (raw.company.logo_url || raw.company.logoUrl) : null)
     || raw.company_logo || raw.companyLogo || (raw.company_data ? raw.company_data.logo_url : null);
   const rawCompanyWebsite = (typeof raw.company === 'object' ? (raw.company.website_url || raw.company.websiteUrl || raw.company.website) : null)
@@ -97,24 +105,24 @@ export function normalizeJob(raw: any): Job {
   const resolvedCompany = resolveCompany(rawCompanyName, rawCompanyLogo, rawCompanyWebsite);
 
   return {
-    id: String(raw.id || raw.external_id || raw.externalJobId || `job-${Date.now()}`),
+    id: String(raw.id || raw.external_id || raw.externalJobId || ''),
     companyId: resolvedCompany.id,
     company_id: resolvedCompany.id,
-    externalJobId: raw.external_id || raw.externalJobId || `EXT-${raw.id || ''}`,
-    title: raw.title || 'Software Engineer',
+    externalJobId: raw.external_id || raw.externalJobId || '',
+    title: raw.title || '',
     company: resolvedCompany.name,
     companyInfo: resolvedCompany,
     companyLogo: resolvedCompany.logoUrl || rawCompanyLogo || '',
     companyWebsite: resolvedCompany.websiteUrl || rawCompanyWebsite || '',
     companyOverview: resolvedCompany.description || raw.company_overview || raw.companyOverview || '',
     industry: resolvedCompany.industry || raw.industry || '',
-    location: raw.location || 'Bengaluru, India',
-    country: raw.country || 'India',
+    location: raw.location || '',
+    country: raw.country || '',
     remoteType: remoteType as any,
-    salaryFormatted: raw.salary_formatted || raw.salaryFormatted || raw.salary || (raw.salary_min ? `₹${(raw.salary_min/100000).toFixed(1)} LPA` : 'Competitive'),
+    salaryFormatted: raw.salary_formatted || raw.salaryFormatted || raw.salary || (raw.salary_min ? `₹${(raw.salary_min/100000).toFixed(1)} LPA` : 'Not specified by employer'),
     salaryMin: raw.salary_min ?? raw.salaryMin,
     salaryMax: raw.salary_max ?? raw.salaryMax,
-    salaryCurrency: raw.salary_currency || raw.salaryCurrency || 'INR',
+    salaryCurrency: raw.salary_currency || raw.salaryCurrency || '',
     salaryPeriod: raw.salary_period || raw.salaryPeriod || 'year',
     employmentType: employmentType as any,
     experienceLevel: experienceLevel as any,
@@ -123,19 +131,19 @@ export function normalizeJob(raw: any): Job {
     responsibilities: parseList(raw.responsibilities),
     requirements: parseList(raw.requirements),
     skills,
-    source: raw.source || 'Verified Source',
+    source: raw.source || raw.source_name || '',
     sourceUrl: raw.source_url || raw.sourceUrl || '',
-    originalJobUrl: raw.original_job_url || raw.originalJobUrl || raw.source_url || raw.sourceUrl || '#',
-    retrievedAt: raw.retrieved_at || raw.retrievedAt || new Date().toISOString(),
-    firstSeenAt: raw.first_seen_at || raw.firstSeenAt || new Date().toISOString(),
-    lastVerifiedAt: raw.last_verified_at || raw.lastVerifiedAt || new Date().toISOString(),
+    originalJobUrl: raw.original_job_url || raw.originalJobUrl || raw.application_url || raw.external_url || raw.source_url || raw.sourceUrl || '',
+    retrievedAt: raw.retrieved_at || raw.retrievedAt || '',
+    firstSeenAt: raw.first_seen_at || raw.firstSeenAt || '',
+    lastVerifiedAt: raw.last_verified_at || raw.lastVerifiedAt || '',
     expiresAt: raw.expires_at || raw.expiresAt,
-    postedAt: raw.posted_at || raw.postedAt || new Date().toISOString(),
-    postedAgo: raw.posted_ago || raw.postedAgo || 'Recently posted',
+    postedAt: raw.posted_at || raw.postedAt || '',
+    postedAgo: raw.posted_ago || raw.postedAgo || '',
     status: raw.status || 'active',
     isFeatured: Boolean(raw.is_featured || raw.isFeatured),
     isVerifiedSource: raw.is_verified ?? raw.isVerifiedSource ?? true,
-    applicationMethod: (raw.application_method || raw.applicationMethod || 'authorized_api') as any,
+    applicationMethod: (raw.application_method || raw.applicationMethod || 'external') as any,
     internshipDetails: raw.internship_details || raw.internshipDetails,
   };
 }
@@ -167,12 +175,11 @@ class ApiService {
   }
 
   public getBaseUrl(): string {
-    // If user explicitly set custom API url in settings/diagnostic, use it;
-    // Otherwise use current origin / relative URL which connects to our Express backend
+    // Prefer an explicitly configured diagnostic URL, otherwise use the API host.
     if (this.customBaseUrl !== null) {
       return this.customBaseUrl.replace(/\/$/, '');
     }
-    return '';
+    return PRIMARY_RENDER_BACKEND;
   }
 
   public setBaseUrl(url: string | null) {
@@ -256,7 +263,11 @@ class ApiService {
     }
 
     try {
-      const response = await fetch(url, { ...options, headers });
+      const response = await fetch(url, {
+        ...options,
+        headers,
+        signal: options.signal ?? AbortSignal.timeout(15000),
+      });
 
       if (response.status === 204) {
         return {} as T;
@@ -267,8 +278,10 @@ class ApiService {
         const detail = errorJson.detail;
         const detailMsg = typeof detail === 'string'
           ? detail
-          : detail?.message || errorJson.error || `Request failed with status ${response.status}`;
-        const errorCode = typeof detail === 'object' ? detail?.code : errorJson.code;
+          : Array.isArray(detail)
+            ? detail.map((item) => item.msg || item.message).filter(Boolean).join('; ')
+            : detail?.message || errorJson.error || `Request failed with status ${response.status}`;
+        const errorCode = typeof detail === 'object' && !Array.isArray(detail) ? detail?.code : errorJson.code;
         console.error(`[JobService API Error] ${options.method || 'GET'} ${url}`, response.status, detailMsg);
         throw new JobServiceError(detailMsg, response.status, url, errorCode);
       }
@@ -278,8 +291,14 @@ class ApiService {
       if (error instanceof JobServiceError) {
         throw error;
       }
+      const timedOut = error?.name === 'TimeoutError' || error?.name === 'AbortError';
       console.error(`[JobService Network Error] ${options.method || 'GET'} ${url}:`, error.message);
-      throw new JobServiceError("We couldn't reach the job service right now.", 0, url);
+      throw new JobServiceError(
+        timedOut ? 'The job service request timed out.' : "We couldn't reach the job service right now.",
+        0,
+        url,
+        timedOut ? 'timeout' : 'network_error',
+      );
     }
   }
 
@@ -369,11 +388,6 @@ class ApiService {
   }
 
   public async logout(): Promise<void> {
-    try {
-      await this.request('/api/auth/logout', { method: 'POST' }, AUTH_API_URL);
-    } catch {
-      // ignore
-    }
     this.setToken(null);
   }
 
@@ -469,6 +483,25 @@ class ApiService {
   public async getApplications(): Promise<any[]> {
     const res = await this.request<any>('/api/applications');
     return res.applications || [];
+  }
+
+  public async getNotifications(): Promise<any[]> {
+    const res = await this.request<any>('/api/notifications');
+    return res.notifications || [];
+  }
+
+  public async updateApplication(
+    id: string,
+    updates: { status?: 'started' | 'submitted'; notes?: string },
+  ): Promise<any> {
+    return this.request<any>(`/api/applications/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    });
+  }
+
+  public async deleteApplication(id: string): Promise<void> {
+    await this.request(`/api/applications/${encodeURIComponent(id)}`, { method: 'DELETE' });
   }
 
   public async createApplication(payload: { job_id: string; status?: string; notes?: string }): Promise<any> {

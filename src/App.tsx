@@ -14,9 +14,8 @@ import {
   AIApplySettings
 } from './types/job';
 import { ConnectedAccount, AccountProvider, OnboardingStep } from './types/auth';
-import { INITIAL_VERIFIED_JOBS } from './data/verifiedJobs';
 import { calculateJobMatch } from './services/matchingEngine';
-import { api } from './services/api';
+import { api, normalizeJob } from './services/api';
 import {
   signOutFirebase,
   onAuthStateSubscription,
@@ -42,6 +41,24 @@ import { InterviewsView } from './components/InterviewsView';
 import { AdminQualityView } from './components/AdminQualityView';
 import { AIApplyModal } from './components/AIApplyModal';
 import { SentEmailsModal } from './components/SentEmailsModal';
+
+function mapApplicationRecord(record: any): Application | null {
+  if (!record?.job) return null;
+  const status: ApplicationStatus = record.status === 'started'
+    ? 'draft'
+    : record.status === 'submitted' || record.status === 'applied'
+      ? 'applied'
+      : record.status;
+  return {
+    id: String(record.id),
+    jobId: String(record.job_id),
+    job: normalizeJob(record.job),
+    status,
+    appliedDate: record.applied_at || '',
+    notes: record.notes || '',
+    updatedAt: record.updated_at || '',
+  };
+}
 
 export default function App() {
   // Navigation view state
@@ -78,13 +95,13 @@ export default function App() {
               name: res.user.name || res.user.displayName || 'Candidate',
               email: res.user.email,
               photoUrl: res.user.photoUrl || firebaseUser.photoURL || undefined,
-              headline: res.user.headline || 'Software Engineer',
-              location: res.user.location || 'Bengaluru, India',
-              about: res.user.about || 'Verified candidate exploring technical roles on openroles.',
+              headline: res.user.headline || '',
+              location: res.user.location || '',
+              about: res.user.about || '',
               careerPreferences: {
-                targetTitles: ['Backend Developer', 'Software Engineer'],
-                preferredLocations: ['Bengaluru, India', 'Remote — India'],
-                remotePreference: 'remote',
+                targetTitles: [],
+                preferredLocations: [],
+                remotePreference: 'any',
                 currency: 'INR'
               },
               isOnboarded: isComplete
@@ -103,90 +120,72 @@ export default function App() {
             setConnectedAccounts(res.connectedAccounts || res.connected_accounts || []);
             setOnboardingStep(res.user.onboardingStep || (isComplete ? 'completed' : 'accounts'));
             localStorage.setItem('openroles_user', JSON.stringify(mappedUser));
+            await refreshAccountData();
           }
         } catch (err) {
           console.error('[openroles] Firebase session sync error:', err);
         }
+      } else {
+        await api.logout();
+        setUser(null);
+        setConnectedAccounts([]);
+        setSavedJobIds(new Set());
+        setApplications([]);
+        setNotifications([]);
       }
     });
 
     return () => unsubscribe();
   }, []);
 
-  // Jobs Dataset (Strictly Verified, No Fake Data)
-  const [jobs, setJobs] = useState<Job[]>(INITIAL_VERIFIED_JOBS);
+  const [jobs, setJobs] = useState<Job[]>([]);
 
-  // Saved Jobs Set
-  const [savedJobIds, setSavedJobIds] = useState<Set<string>>(() => {
-    const saved = localStorage.getItem('openroles_saved');
-    if (saved) {
-      try {
-        return new Set(JSON.parse(saved));
-      } catch {
-        // ignore
-      }
-    }
-    return new Set(['1', '4', '6']);
-  });
+  const [savedJobIds, setSavedJobIds] = useState<Set<string>>(new Set());
 
-  // Applications
-  const [applications, setApplications] = useState<Application[]>(() => {
-    const saved = localStorage.getItem('openroles_apps');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {
-        // ignore
-      }
-    }
-    return [
-      {
-        id: 'app-goog-1',
-        jobId: '1',
-        job: INITIAL_VERIFIED_JOBS[0],
-        status: 'interview',
-        appliedDate: '2026-09-29',
-        destinationPortal: 'Google Careers Official',
-        submissionTransactionId: 'TX-GOOG-8812',
-        updatedAt: '2026-10-01T10:00:00Z'
-      }
-    ];
-  });
+  const [applications, setApplications] = useState<Application[]>([]);
 
-  // Confirmed Interviews
-  const [interviews, setInterviews] = useState<Interview[]>([
-    {
-      id: 'int-goog-round1',
-      applicationId: 'app-goog-1',
-      company: 'Google',
-      role: 'Software Engineering Summer Intern (2027)',
-      companyLogo: 'https://logo.clearbit.com/google.com',
-      startTime: '2026-10-08T10:00:00+05:30',
-      endTime: '2026-10-08T11:00:00+05:30',
-      timezone: 'Asia/Kolkata',
-      meetingUrl: 'https://meet.google.com/xyz-qwer-abc',
-      location: 'Google Meet (Virtual)',
-      interviewer: 'Ananya Sharma (Senior Staff Software Engineer, Google Search)',
-      status: 'confirmed',
-      calendarEventCreated: true,
-      notes: 'Round 1: Data Structures & Algorithmic Problem Solving (60 mins on CoderPad)'
-    }
-  ]);
+  const [interviews] = useState<Interview[]>([]);
 
-  // Notifications
-  const [notifications, setNotifications] = useState<UserNotification[]>([
-    {
-      id: 'notif-1',
-      title: 'Google Interview Scheduled',
-      message: 'Your Round 1 DSA interview is confirmed for Oct 8, 2026 at 10:00 AM IST.',
-      type: 'application_update',
-      read: false,
-      createdAt: new Date().toISOString()
-    }
-  ]);
+  const [notifications, setNotifications] = useState<UserNotification[]>([]);
 
   // Sent Emails
   const [sentEmails, setSentEmails] = useState<SentEmail[]>([]);
+
+  const refreshAccountData = async () => {
+    const [savedResult, applicationsResult, notificationsResult] = await Promise.allSettled([
+      api.getSavedJobs(),
+      api.getApplications(),
+      api.getNotifications(),
+    ]);
+
+    if (savedResult.status === 'fulfilled') {
+      setSavedJobIds(new Set(savedResult.value.map((job) => job.id)));
+    } else {
+      console.error('[openroles] Could not load saved jobs:', savedResult.reason);
+    }
+    if (applicationsResult.status === 'fulfilled') {
+      setApplications(
+        applicationsResult.value
+          .map(mapApplicationRecord)
+          .filter((application): application is Application => application !== null),
+      );
+    } else {
+      console.error('[openroles] Could not load applications:', applicationsResult.reason);
+    }
+    if (notificationsResult.status === 'fulfilled') {
+      setNotifications(notificationsResult.value.map((item) => ({
+        id: String(item.id),
+        title: item.title || '',
+        message: item.message || '',
+        type: item.notification_type || item.type || 'system',
+        jobId: item.job_id || item.jobId,
+        read: Boolean(item.is_read ?? item.read),
+        createdAt: item.created_at || item.createdAt || '',
+      })));
+    } else {
+      console.error('[openroles] Could not load notifications:', notificationsResult.reason);
+    }
+  };
 
   // Modals
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
@@ -224,19 +223,20 @@ export default function App() {
           name: res.user.name || res.user.displayName || 'Candidate',
           email: res.user.email,
           photoUrl: res.user.photoUrl || firebaseUser.photoURL || undefined,
-          headline: res.user.headline || 'Software Engineer',
-          location: res.user.location || 'Bengaluru, India',
-          about: res.user.about || 'Verified candidate exploring opportunities on openroles.',
+          headline: res.user.headline || '',
+          location: res.user.location || '',
+          about: res.user.about || '',
           careerPreferences: {
-            targetTitles: ['Backend Developer', 'Software Engineer'],
-            preferredLocations: ['Bengaluru, India', 'Remote — India'],
-            remotePreference: 'remote',
+            targetTitles: [],
+            preferredLocations: [],
+            remotePreference: 'any',
             currency: 'INR'
           },
           isOnboarded: isComplete
         };
         setUser(mappedUser);
         setConnectedAccounts(res.connectedAccounts || res.connected_accounts || []);
+        await refreshAccountData();
         localStorage.setItem('openroles_user', JSON.stringify(mappedUser));
         setAuthScreenOpen(false);
 

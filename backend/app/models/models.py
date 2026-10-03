@@ -201,6 +201,7 @@ class Application(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     user = relationship("User", back_populates="applications")
+    job = relationship("Job")
 
 class JobAlert(Base):
     __tablename__ = "job_alerts"

@@ -13,10 +13,23 @@ from .services.user_repository import (
     get_or_create_firebase_user,
     get_user_by_firebase_uid,
 )
-from .services.company_logo_service import CompanyLogoService, VERIFIED_ENTERPRISE_COMPANIES
+from .services.job_repository import (
+    create_application as create_application_record,
+    delete_application as delete_application_record,
+    get_applications as get_application_records,
+    get_company,
+    get_connected_accounts,
+    disconnect_connected_account,
+    get_job,
+    get_saved_jobs as get_saved_job_records,
+    get_user_dashboard,
+    get_user_notifications,
+    list_companies,
+    list_jobs as list_job_records,
+    set_job_saved,
+    update_application_status,
+)
 from .integrations.job_portals import JobPortalGatewayRegistry
-from .integrations.github import GitHubIntegrationService
-from .integrations.linkedin import LinkedInIntegrationService
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -307,7 +320,11 @@ class ConnectLinkedInPayload(BaseModel):
 
 class ApplicationPayload(BaseModel):
     job_id: str
-    status: Optional[str] = "Applied"
+    status: Optional[str] = "started"
+    notes: Optional[str] = None
+
+class ApplicationStatusPayload(BaseModel):
+    status: Optional[str] = None
     notes: Optional[str] = None
 
 # ================= ROOT & HEALTH ENDPOINTS =================
@@ -345,135 +362,62 @@ def list_jobs(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0)
 ):
-    """
-    Search and filter authentic jobs from PostgreSQL database / verified feeds.
-    Strictly supports both workspace=all and workplace parameters.
-    """
-    results = list(VERIFIED_JOBS_DB)
-
-    # Workplace / workspace filtering
-    wp = workspace or workplace
-    if wp and wp.lower() != "all":
-        results = [j for j in results if j["workplace"].lower() == wp.lower() or j["remote_type"].lower() == wp.lower()]
-
-    # Search keyword filtering
-    term = (search or q or "").lower().strip()
-    if term:
-        results = [
-            j for j in results
-            if term in j["title"].lower()
-            or term in j["company"].lower()
-            or term in j["description"].lower()
-            or any(term in s.lower() for s in j["skills"])
-        ]
-
-    # Location filtering
-    if location and location.strip():
-        loc = location.lower().strip()
-        results = [j for j in results if loc in j["location"].lower()]
-
-    # Experience level
-    if experience and experience.strip() and experience.lower() != "any experience":
-        exp = experience.lower().strip()
-        results = [j for j in results if j["experience_level"].lower() == exp]
-
-    # Employment type
-    if employment_type and employment_type.strip() and employment_type.lower() != "any employment":
-        emp = employment_type.lower().strip()
-        results = [j for j in results if j["employment_type"].lower() == emp]
-
-    # Company filter
-    if company and company.strip():
-        comp = company.lower().strip()
-        results = [j for j in results if comp in j["company"].lower()]
-
-    # Skills filter (comma-separated)
-    if skills and skills.strip():
-        req_skills = [s.strip().lower() for s in skills.split(",") if s.strip()]
-        if req_skills:
-            results = [
-                j for j in results
-                if any(any(rs in s.lower() for s in j["skills"]) for rs in req_skills)
-            ]
-
-def format_job_dict(j: Dict[str, Any]) -> Dict[str, Any]:
-    comp = CompanyLogoService.resolve_company(
-        j.get("company", ""),
-        j.get("company_logo"),
-        j.get("company_website")
-    )
-    return {
-        **j,
-        "company": comp["name"],
-        "company_id": comp["id"],
-        "company_data": comp,
-        "company_logo": comp["logo_url"] or j.get("company_logo"),
-        "company_website": comp["website_url"] or j.get("company_website"),
-        "company_overview": comp.get("description") or j.get("company_overview"),
-        "industry": comp.get("industry") or j.get("industry"),
-    }
-
-    # Paginate
-    total = len(results)
-    paginated = [format_job_dict(j) for j in results[offset : offset + limit]]
-
-    return {
-        "jobs": paginated,
-        "total": total,
-        "page": (offset // limit) + 1,
-        "page_size": limit,
-        "total_pages": max(1, (total + limit - 1) // limit)
-    }
+    """Search and filter active job listings stored in PostgreSQL."""
+    return list_job_records({
+        "workspace": workspace,
+        "workplace": workplace,
+        "search": search,
+        "q": q,
+        "location": location,
+        "experience": experience,
+        "employment_type": employment_type,
+        "posted_within_days": posted_within_days,
+        "skills": skills,
+        "company": company,
+        "salary_min": salary_min,
+        "salary_max": salary_max,
+        "limit": limit,
+        "offset": offset,
+    })
 
 @app.get("/api/jobs/recommended")
 def get_recommended_jobs():
-    """Returns AI-recommended jobs with match percentages and skill breakdowns."""
-    recommended = []
-    for job in VERIFIED_JOBS_DB[:6]:
-        formatted = format_job_dict(job)
-        recommended.append({
-            **formatted,
-            "profile_match": 92 if "Intern" in job["title"] else 88,
-            "matching_skills": job["skills"][:4],
-            "potential_gaps": ["Docker"] if "Docker" not in job["skills"] else ["Kubernetes"]
-        })
-    return {"jobs": recommended, "total": len(recommended)}
+    """Return real active listings without fabricated match scores."""
+    result = list_job_records({"limit": 6, "offset": 0})
+    return {"jobs": result["jobs"], "total": result["total"]}
 
 @app.get("/api/jobs/{job_id}")
 def get_job_by_id(job_id: str):
-    """Retrieve full details for a single verified job."""
-    for job in VERIFIED_JOBS_DB:
-        if job["id"] == job_id or job["external_id"] == job_id:
-            return format_job_dict(job)
+    """Retrieve full details for a single active database listing."""
+    job = get_job(job_id)
+    if job:
+        return job
     raise HTTPException(status_code=404, detail="Job not found or listing has expired.")
 
 # ================= COMPANIES & LOGO HEALTH (Section 3, 15, 18, 19) =================
 
 @app.get("/api/companies")
 def get_companies():
-    """Returns canonical company directory with verified logos."""
-    return {"companies": VERIFIED_ENTERPRISE_COMPANIES, "total": len(VERIFIED_ENTERPRISE_COMPANIES)}
+    """Return companies represented by database-backed job listings."""
+    companies = list_companies()
+    return {"companies": companies, "total": len(companies)}
 
 @app.get("/api/companies/{company_id}")
 def get_company_by_id(company_id: str):
-    """Returns single company details and associated active verified job listings."""
-    for comp in VERIFIED_ENTERPRISE_COMPANIES:
-        if comp["id"] == company_id or comp["slug"] == company_id or comp["normalized_name"] == company_id.lower():
-            related_jobs = [format_job_dict(j) for j in VERIFIED_JOBS_DB if j["company"].lower() == comp["name"].lower()]
-            return {
-                "company": comp,
-                "jobs": related_jobs,
-                "active_jobs_count": len(related_jobs)
-            }
+    """Return a company and its active database-backed listings."""
+    company = get_company(company_id)
+    if company:
+        return company
     raise HTTPException(status_code=404, detail="Company not found in verified registry.")
 
 @app.get("/api/admin/company-logo-health")
 def get_company_logo_health():
     """Admin diagnostic report on company logos, domains, and fallback status (Section 18)."""
-    total = len(VERIFIED_ENTERPRISE_COMPANIES)
-    with_logos = [c for c in VERIFIED_ENTERPRISE_COMPANIES if c.get("logo_url")]
-    without_logos = [c for c in VERIFIED_ENTERPRISE_COMPANIES if not c.get("logo_url")]
-    verified = [c for c in VERIFIED_ENTERPRISE_COMPANIES if c.get("logo_source") in ("official", "licensed")]
+    companies = list_companies()
+    total = len(companies)
+    with_logos = [c for c in companies if c.get("logo_url")]
+    without_logos = [c for c in companies if not c.get("logo_url")]
+    verified = [c for c in companies if c.get("verified") and c.get("logo_url")]
 
     return {
         "status": "healthy",
@@ -503,30 +447,34 @@ def get_company_logo_health():
                 "has_logo": bool(c.get("logo_url")),
                 "verified": c.get("verified", True)
             }
-            for c in VERIFIED_ENTERPRISE_COMPANIES
+            for c in companies
         ]
     }
 
 # ================= SAVED JOBS =================
 
 @app.get("/api/saved-jobs")
-def get_saved_jobs():
-    saved = [format_job_dict(j) for j in VERIFIED_JOBS_DB if j["id"] in SAVED_JOB_IDS]
+def get_saved_jobs(current_claims: Dict[str, Any] = Depends(get_current_firebase_user)):
+    saved = get_saved_job_records(current_claims["uid"])
     return {"jobs": saved, "total": len(saved)}
 
 @app.post("/api/jobs/{job_id}/save")
-def save_job(job_id: str):
-    SAVED_JOB_IDS.add(job_id)
+def save_job(
+    job_id: str,
+    current_claims: Dict[str, Any] = Depends(get_current_firebase_user),
+):
+    set_job_saved(current_claims["uid"], job_id, True)
     return {"success": True, "saved": True, "job_id": job_id}
 
 @app.delete("/api/jobs/{job_id}/save")
-def unsave_job(job_id: str):
-    SAVED_JOB_IDS.discard(job_id)
+def unsave_job(
+    job_id: str,
+    current_claims: Dict[str, Any] = Depends(get_current_firebase_user),
+):
+    set_job_saved(current_claims["uid"], job_id, False)
     return {"success": True, "saved": False, "job_id": job_id}
 
 # ================= PRODUCTION AUTHENTICATION & ONBOARDING =================
-
-CONNECTED_ACCOUNTS_DB: Dict[str, List[Dict[str, Any]]] = {}
 
 @app.post("/api/auth/firebase-verify")
 def verify_firebase_login(
@@ -538,7 +486,7 @@ def verify_firebase_login(
     Synchronizes user idempotently into PostgreSQL.
     """
     user = get_or_create_firebase_user(token_claims)
-    conns = CONNECTED_ACCOUNTS_DB.setdefault(user["id"], [])
+    conns = get_connected_accounts(user["firebase_uid"])
     step = "completed" if user["onboarding_completed"] else ("terms" if conns else "accounts")
 
     return {
@@ -574,7 +522,7 @@ def get_me(current_claims: Dict[str, Any] = Depends(get_current_firebase_user)):
     if not user:
         raise HTTPException(status_code=404, detail="User account not found. Complete Firebase sign-in first.")
 
-    conns = CONNECTED_ACCOUNTS_DB.setdefault(user["id"], [])
+    conns = get_connected_accounts(user["firebase_uid"])
     step = "completed" if user["onboarding_completed"] else ("terms" if conns else "accounts")
 
     return {
@@ -674,143 +622,37 @@ def get_integrations_status(current_claims: Dict[str, Any] = Depends(get_current
     user = get_user_by_firebase_uid(uid)
     if not user:
         raise HTTPException(status_code=404, detail="User account not found.")
-    user_id = user["id"]
-    conns = CONNECTED_ACCOUNTS_DB.get(user_id, [])
+    conns = get_connected_accounts(uid)
     return {"connected_accounts": conns}
 
 @app.post("/api/integrations/github/connect")
-async def connect_github(
-    payload: ConnectGitHubPayload,
-    current_claims: Dict[str, Any] = Depends(get_current_firebase_user)
-):
-    """Section 14, 15, 16: Connects GitHub and imports verified public profile & repositories."""
-    uid = current_claims["uid"]
-    user = await run_in_threadpool(get_user_by_firebase_uid, uid)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found.")
-
-    username = payload.username.strip()
-    if not username:
-        raise HTTPException(status_code=400, detail="Username is required.")
-
-    # Fetch real data via GitHub public API
-    github_service = GitHubIntegrationService()
-    profile_data = {
-        "login": username,
-        "name": username.capitalize(),
-        "avatar_url": f"https://avatars.githubusercontent.com/{username}",
-        "bio": "Software developer & candidate on openroles",
-        "company": "Tech Contributor",
-        "location": "Bengaluru, India",
-        "html_url": f"https://github.com/{username}",
-        "public_repos": 14,
-        "followers": 22
-    }
-
-    try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            resp = await client.get(
-                f"https://api.github.com/users/{username}",
-                headers={"User-Agent": "openroles-job-portal"}
-            )
-            if resp.status_code == 200:
-                profile_data = resp.json()
-    except Exception:
-        pass
-
-    normalized = github_service.normalize_profile(
-        profile_data,
-        [
-            {"name": "fastapi-microservices", "description": "High-throughput REST API with PostgreSQL", "language": "Python", "stargazers_count": 12, "forks_count": 3, "html_url": f"https://github.com/{username}/fastapi-microservices"},
-            {"name": "openroles-frontend", "description": "Clean recruitment discovery client in TypeScript", "language": "TypeScript", "stargazers_count": 8, "forks_count": 1, "html_url": f"https://github.com/{username}/openroles-frontend"}
-        ]
+def connect_github(current_claims: Dict[str, Any] = Depends(get_current_firebase_user)):
+    """Reject username-only linking until a real OAuth flow is configured."""
+    raise HTTPException(
+        status_code=501,
+        detail="GitHub OAuth is not configured. No account was connected.",
     )
-
-    user_id = user["id"]
-    conns = CONNECTED_ACCOUNTS_DB.setdefault(user_id, [])
-    # Update or insert
-    existing = next((c for c in conns if c["provider"] == "github"), None)
-    if existing:
-        existing.update({
-            "provider_username": username,
-            "status": "connected",
-            "last_synced_at": datetime.utcnow().isoformat(),
-            "summary": normalized
-        })
-    else:
-        conns.append({
-            "id": f"conn-gh-{uuid.uuid4().hex[:6]}",
-            "provider": "github",
-            "provider_username": username,
-            "status": "connected",
-            "connected_at": datetime.utcnow().isoformat(),
-            "last_synced_at": datetime.utcnow().isoformat(),
-            "summary": normalized
-        })
-
-    return {"success": True, "connected_account": conns[-1]}
 
 @app.post("/api/integrations/github/disconnect")
 def disconnect_github(current_claims: Dict[str, Any] = Depends(get_current_firebase_user)):
-    """Section 41: Disconnects GitHub account cleanly without wiping core user profile."""
+    """Disconnects a previously OAuth-authorized GitHub account."""
     uid = current_claims["uid"]
-    user = get_user_by_firebase_uid(uid)
-    if not user:
-        raise HTTPException(status_code=404, detail="User account not found.")
-    conns = CONNECTED_ACCOUNTS_DB.get(user["id"], [])
-    CONNECTED_ACCOUNTS_DB[user["id"]] = [c for c in conns if c["provider"] != "github"]
+    disconnect_connected_account(uid, "github")
     return {"success": True, "message": "GitHub disconnected."}
 
 @app.post("/api/integrations/linkedin/connect")
-def connect_linkedin(
-    payload: ConnectLinkedInPayload,
-    current_claims: Dict[str, Any] = Depends(get_current_firebase_user)
-):
-    """Section 11, 12, 13: Official LinkedIn integration & connection handler."""
-    uid = current_claims["uid"]
-    user = get_user_by_firebase_uid(uid)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found.")
-
-    user_id = user["id"]
-    conns = CONNECTED_ACCOUNTS_DB.setdefault(user_id, [])
-    existing = next((c for c in conns if c["provider"] == "linkedin"), None)
-
-    summary = {
-        "name": user.get("name", "Candidate"),
-        "headline": "Verified Software Engineer • LinkedIn Member",
-        "avatar_url": user.get("photo_url") or "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100",
-        "profile_url": "https://linkedin.com/in/verified-candidate"
-    }
-
-    if existing:
-        existing.update({
-            "status": "connected",
-            "last_synced_at": datetime.utcnow().isoformat(),
-            "summary": summary
-        })
-    else:
-        conns.append({
-            "id": f"conn-li-{uuid.uuid4().hex[:6]}",
-            "provider": "linkedin",
-            "provider_username": user.get("email", "").split("@")[0],
-            "status": "connected",
-            "connected_at": datetime.utcnow().isoformat(),
-            "last_synced_at": datetime.utcnow().isoformat(),
-            "summary": summary
-        })
-
-    return {"success": True, "connected_account": conns[-1]}
+def connect_linkedin(current_claims: Dict[str, Any] = Depends(get_current_firebase_user)):
+    """Do not report a connection without a real OAuth authorization."""
+    raise HTTPException(
+        status_code=501,
+        detail="LinkedIn OAuth is not configured. No account was connected.",
+    )
 
 @app.post("/api/integrations/linkedin/disconnect")
 def disconnect_linkedin(current_claims: Dict[str, Any] = Depends(get_current_firebase_user)):
-    """Section 41: Disconnects LinkedIn account cleanly."""
+    """Disconnects a previously OAuth-authorized LinkedIn account."""
     uid = current_claims["uid"]
-    user = get_user_by_firebase_uid(uid)
-    if not user:
-        raise HTTPException(status_code=404, detail="User account not found.")
-    conns = CONNECTED_ACCOUNTS_DB.get(user["id"], [])
-    CONNECTED_ACCOUNTS_DB[user["id"]] = [c for c in conns if c["provider"] != "linkedin"]
+    disconnect_connected_account(uid, "linkedin")
     return {"success": True, "message": "LinkedIn disconnected."}
 
 @app.get("/api/integrations/job-portals")
@@ -821,77 +663,54 @@ def get_job_portal_gateways():
 
 # ================= APPLICATIONS & DASHBOARD =================
 
-APPLICATIONS_DB = [
-    {
-        "id": "app-1",
-        "job_id": "1",
-        "job_title": "Software Engineering Summer Intern (2027)",
-        "company": "Google",
-        "status": "Interview",
-        "applied_at": (datetime.utcnow() - timedelta(days=4)).isoformat(),
-        "updated_at": (datetime.utcnow() - timedelta(days=1)).isoformat()
-    }
-]
-
 @app.get("/api/applications")
-def get_applications():
-    return {"applications": APPLICATIONS_DB, "total": len(APPLICATIONS_DB)}
+def get_applications(current_claims: Dict[str, Any] = Depends(get_current_firebase_user)):
+    applications = get_application_records(current_claims["uid"])
+    return {"applications": applications, "total": len(applications)}
 
 @app.post("/api/applications")
-def create_application(payload: ApplicationPayload):
-    job = next((j for j in VERIFIED_JOBS_DB if j["id"] == payload.job_id), None)
-    new_app = {
-        "id": f"app-{uuid.uuid4().hex[:6]}",
-        "job_id": payload.job_id,
-        "job_title": job["title"] if job else "Software Engineer",
-        "company": job["company"] if job else "Employer",
-        "status": payload.status or "Applied",
-        "applied_at": datetime.utcnow().isoformat(),
-        "updated_at": datetime.utcnow().isoformat()
-    }
-    APPLICATIONS_DB.insert(0, new_app)
-    return new_app
+def create_application(
+    payload: ApplicationPayload,
+    current_claims: Dict[str, Any] = Depends(get_current_firebase_user),
+):
+    status_value = (payload.status or "started").strip().lower()
+    if status_value == "applied":
+        status_value = "submitted"
+    if status_value not in {"started", "submitted"}:
+        raise HTTPException(status_code=400, detail="Application status must be started or submitted.")
+    return create_application_record(
+        current_claims["uid"],
+        payload.job_id,
+        status_value,
+        payload.notes,
+    )
 
 @app.put("/api/applications/{app_id}")
-def update_application(app_id: str, payload: Dict[str, Any]):
-    for app_item in APPLICATIONS_DB:
-        if app_item["id"] == app_id:
-            app_item.update(payload)
-            app_item["updated_at"] = datetime.utcnow().isoformat()
-            return app_item
-    raise HTTPException(status_code=404, detail="Application not found")
+def update_application(
+    app_id: str,
+    payload: ApplicationStatusPayload,
+    current_claims: Dict[str, Any] = Depends(get_current_firebase_user),
+):
+    status_value = payload.status.strip().lower() if payload.status else None
+    if status_value is not None and status_value not in {"started", "submitted"}:
+        raise HTTPException(status_code=400, detail="Only started or submitted application statuses may be set by a candidate.")
+    if status_value is None and payload.notes is None:
+        raise HTTPException(status_code=400, detail="Provide a candidate-owned status or notes update.")
+    return update_application_status(current_claims["uid"], app_id, status_value, payload.notes)
 
 @app.delete("/api/applications/{app_id}")
-def delete_application(app_id: str):
-    global APPLICATIONS_DB
-    APPLICATIONS_DB = [a for a in APPLICATIONS_DB if a["id"] != app_id]
+def delete_application(
+    app_id: str,
+    current_claims: Dict[str, Any] = Depends(get_current_firebase_user),
+):
+    delete_application_record(current_claims["uid"], app_id)
     return {"success": True}
 
 @app.get("/api/dashboard")
-def get_dashboard():
-    return {
-        "metrics": {
-            "recommended": 12,
-            "saved": len(SAVED_JOB_IDS),
-            "applications": len(APPLICATIONS_DB),
-            "interviews": sum(1 for a in APPLICATIONS_DB if a.get("status") == "Interview"),
-            "completion": "92%"
-        },
-        "user": {
-            "name": "Alex Morgan",
-            "email": "candidate@openroles.example"
-        }
-    }
+def get_dashboard(current_claims: Dict[str, Any] = Depends(get_current_firebase_user)):
+    return get_user_dashboard(current_claims["uid"])
 
 @app.get("/api/notifications")
-def get_notifications():
-    return {
-        "notifications": [
-            {
-                "id": "notif-1",
-                "message": "Google reviewed your application for Software Engineering Summer Intern.",
-                "created_at": (datetime.utcnow() - timedelta(hours=3)).isoformat(),
-                "read": False
-            }
-        ]
-    }
+def get_notifications(current_claims: Dict[str, Any] = Depends(get_current_firebase_user)):
+    notifications = get_user_notifications(current_claims["uid"])
+    return {"notifications": notifications, "total": len(notifications)}

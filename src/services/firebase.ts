@@ -20,7 +20,6 @@ import {
   OAuthCredential
 } from 'firebase/auth';
 import { getAnalytics } from 'firebase/analytics';
-import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import appletConfig from '../../firebase-applet-config.json';
 
 /**
@@ -43,9 +42,8 @@ const app: FirebaseApp = getApps().length > 0 ? getApp() : initializeApp(firebas
 // Initialize Firebase Authentication
 export const auth = getAuth(app);
 
-// Initialize Firebase Analytics and the default Firestore database
+// Initialize Firebase Analytics.
 export const analytics = getAnalytics(app);
-export const db = getFirestore(app);
 
 const emailVerificationActionCodeSettings: ActionCodeSettings = {
   url: window.location.origin,
@@ -84,18 +82,6 @@ async function linkPendingGoogleCredential(user: FirebaseUser): Promise<Firebase
   pendingGoogleEmail = null;
   return linked.user;
 }
-
-// Validate Connection to Firestore on startup
-async function testFirestoreConnection() {
-  try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.warn('[Firebase] Firestore client offline or waiting for network.');
-    }
-  }
-}
-testFirestoreConnection();
 
 // Configure Google OAuth Provider
 export const googleProvider = new GoogleAuthProvider();
