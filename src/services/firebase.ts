@@ -1,8 +1,12 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import {
   getAuth,
+  ActionCodeSettings,
   GoogleAuthProvider,
   signInWithPopup,
+  sendSignInLinkToEmail,
+  isSignInWithEmailLink,
+  signInWithEmailLink,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   sendEmailVerification,
@@ -39,6 +43,12 @@ export const auth = getAuth(app);
 // Initialize Firebase Analytics and the default Firestore database
 export const analytics = getAnalytics(app);
 export const db = getFirestore(app);
+
+const emailVerificationActionCodeSettings: ActionCodeSettings = {
+  url: window.location.origin,
+  handleCodeInApp: true
+};
+export const emailForSignInStorageKey = 'emailForSignIn';
 
 // Validate Connection to Firestore on startup
 async function testFirestoreConnection() {
@@ -79,17 +89,20 @@ export function getFirebaseErrorMessage(error: any): string {
     case 'auth/api-key-not-valid.-please-pass-a-valid-api-key.':
       return 'Firebase API key is refreshing. Please try again or use direct login.';
     case 'auth/operation-not-allowed':
-      return 'Google sign-in is pending activation in the Firebase console. Please use Email sign-up or Demo sign-in.';
+      return 'This sign-in method is not enabled in Firebase Authentication. Enable it in the Firebase console and try again.';
     case 'auth/email-already-in-use':
       return 'An account already exists with this email address. Please sign in instead.';
     case 'auth/invalid-email':
       return 'Please enter a valid email address.';
+    case 'auth/invalid-action-code':
+    case 'auth/expired-action-code':
+      return 'This email sign-in link is invalid or has expired. Request a new link and try again.';
     case 'auth/weak-password':
       return 'Password should be at least 6 characters.';
     case 'auth/wrong-password':
     case 'auth/user-not-found':
     case 'auth/invalid-credential':
-      return 'Invalid email or password.';
+      return 'Invalid email or sign-in credentials.';
     case 'auth/network-request-failed':
       return 'Network connection error. Please check your internet connection.';
     case 'auth/too-many-requests':
@@ -131,7 +144,7 @@ export async function registerWithEmail(
     }
     let emailSent = false;
     try {
-      await sendEmailVerification(result.user);
+      await sendEmailVerification(result.user, emailVerificationActionCodeSettings);
       emailSent = true;
     } catch (verifyErr) {
       console.warn('[Firebase Auth] Verification email dispatch note:', verifyErr);
@@ -157,6 +170,58 @@ export async function loginWithEmail(
     return { user: result.user, token };
   } catch (error: any) {
     console.error('[Firebase Auth] Email Login Error:', error);
+    throw new Error(getFirebaseErrorMessage(error));
+  }
+}
+
+/**
+ * Send a passwordless email sign-in link.
+ * Returns false only when the link was sent but the browser could not save the email locally.
+ */
+export async function sendEmailSignInLink(email: string): Promise<boolean> {
+  const normalizedEmail = email.trim();
+  try {
+    await sendSignInLinkToEmail(auth, normalizedEmail, emailVerificationActionCodeSettings);
+  } catch (error: any) {
+    console.error('[Firebase Auth] Email Sign-In Link Error:', error);
+    throw new Error(getFirebaseErrorMessage(error));
+  }
+
+  try {
+    window.localStorage.setItem(emailForSignInStorageKey, normalizedEmail);
+    return true;
+  } catch (error) {
+    console.error('[Firebase Auth] Could not save email for sign-in link:', error);
+    return false;
+  }
+}
+
+export function isEmailLinkSignIn(): boolean {
+  return isSignInWithEmailLink(auth, window.location.href);
+}
+
+/**
+ * Complete passwordless email sign-in using the current URL's one-time link.
+ */
+export async function completeEmailLinkSignIn(
+  email: string
+): Promise<{ user: FirebaseUser; token: string }> {
+  try {
+    const result = await signInWithEmailLink(auth, email.trim(), window.location.href);
+    try {
+      window.localStorage.removeItem(emailForSignInStorageKey);
+    } catch (storageError) {
+      console.error('[Firebase Auth] Could not clear saved email for sign-in link:', storageError);
+    }
+    const currentUrl = new URL(window.location.href);
+    ['apiKey', 'mode', 'oobCode', 'lang', 'tenantId'].forEach((parameter) => {
+      currentUrl.searchParams.delete(parameter);
+    });
+    window.history.replaceState(null, document.title, currentUrl.toString());
+    const token = await result.user.getIdToken();
+    return { user: result.user, token };
+  } catch (error: any) {
+    console.error('[Firebase Auth] Email Link Sign-In Error:', error);
     throw new Error(getFirebaseErrorMessage(error));
   }
 }

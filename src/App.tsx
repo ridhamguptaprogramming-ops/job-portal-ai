@@ -17,7 +17,11 @@ import { ConnectedAccount, AccountProvider, OnboardingStep } from './types/auth'
 import { INITIAL_VERIFIED_JOBS } from './data/verifiedJobs';
 import { calculateJobMatch } from './services/matchingEngine';
 import { api } from './services/api';
-import { signOutFirebase, onAuthStateSubscription } from './services/firebase';
+import {
+  signOutFirebase,
+  onAuthStateSubscription,
+  isEmailLinkSignIn
+} from './services/firebase';
 
 import { Navbar } from './components/Navbar';
 import { HomeView } from './components/HomeView';
@@ -91,6 +95,13 @@ export default function App() {
   ]);
   const [authScreenOpen, setAuthScreenOpen] = useState(false);
   const [authMode, setAuthMode] = useState<'signup' | 'signin'>('signup');
+
+  useEffect(() => {
+    if (isEmailLinkSignIn()) {
+      setAuthMode('signin');
+      setAuthScreenOpen(true);
+    }
+  }, []);
 
   // Listen to Firebase Auth state changes (Section 37)
   useEffect(() => {

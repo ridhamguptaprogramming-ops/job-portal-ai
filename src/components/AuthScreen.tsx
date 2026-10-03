@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Mail,
   Lock,
@@ -14,6 +14,10 @@ import {
   signInWithGoogle,
   registerWithEmail,
   loginWithEmail,
+  sendEmailSignInLink,
+  isEmailLinkSignIn,
+  completeEmailLinkSignIn,
+  emailForSignInStorageKey,
   sendPasswordReset,
   getFirebaseErrorMessage
 } from '../services/firebase';
@@ -35,10 +39,72 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const [isEmailLinkSending, setIsEmailLinkSending] = useState(false);
+  const [isEmailLinkPending, setIsEmailLinkPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
   const [forgotPasswordOpen, setForgotPasswordOpen] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
+
+  const finishEmailLinkSignIn = async (emailForLink: string) => {
+    if (!emailForLink.trim()) {
+      setError('Enter the email address that received the sign-in link.');
+      return;
+    }
+
+    setError(null);
+    setIsLoading(true);
+    try {
+      const { user, token } = await completeEmailLinkSignIn(emailForLink);
+      onAuthSuccess(user, token);
+    } catch (err: any) {
+      setError(err.message || 'Could not complete email-link sign-in.');
+      setIsEmailLinkPending(true);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isEmailLinkSignIn()) return;
+
+    setMode('signin');
+    try {
+      const savedEmail = window.localStorage.getItem(emailForSignInStorageKey);
+      if (savedEmail) {
+        setEmail(savedEmail);
+        void finishEmailLinkSignIn(savedEmail);
+        return;
+      }
+    } catch (storageError) {
+      console.error('[Firebase Auth] Could not read saved email for sign-in link:', storageError);
+    }
+
+    setIsEmailLinkPending(true);
+  }, []);
+
+  const handleSendEmailSignInLink = async () => {
+    if (!email.trim()) {
+      setError('Enter your email address to receive a sign-in link.');
+      return;
+    }
+
+    setError(null);
+    setSuccessNotice(null);
+    setIsEmailLinkSending(true);
+    try {
+      const emailStored = await sendEmailSignInLink(email);
+      setSuccessNotice(
+        emailStored
+          ? `A sign-in link was sent to ${email.trim()}. Check your inbox to continue.`
+          : `A sign-in link was sent to ${email.trim()}. If you open it on another device, enter this email address to finish signing in.`
+      );
+    } catch (err: any) {
+      setError(err.message || 'Could not send an email sign-in link.');
+    } finally {
+      setIsEmailLinkSending(false);
+    }
+  };
 
   // Handle Google Sign-Up / Sign-In via Firebase
   const handleGoogleAuth = async () => {
@@ -156,6 +222,51 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
             </div>
           )}
 
+          {isEmailLinkPending ? (
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                void finishEmailLinkSignIn(email);
+              }}
+              className="space-y-4"
+            >
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-[#53594F] mb-1">
+                  Confirm your email
+                </label>
+                <p className="text-xs text-[#666666] mb-3">
+                  Enter the email address that received this sign-in link.
+                </p>
+                <input
+                  type="email"
+                  required
+                  autoComplete="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="name@example.com"
+                  className="w-full px-3 py-2 border border-[#E5E5E5] text-xs text-[#1F1F1F] placeholder-slate-400 focus:outline-none focus:border-[#B18A08]"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="w-full py-2.5 bg-[#F4C430] hover:bg-[#e0b224] text-[#1F1F1F] text-xs font-bold transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {isLoading ? 'Signing in...' : 'Complete sign-in'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsEmailLinkPending(false);
+                  setError(null);
+                }}
+                className="w-full text-xs text-[#745800] hover:text-[#B18A08] font-semibold underline underline-offset-2"
+              >
+                Use another sign-in method
+              </button>
+            </form>
+          ) : (
+          <>
           {/* Google Sign-In Button */}
           <div className="space-y-2">
             <button
@@ -290,7 +401,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
             <button
               type="submit"
-              disabled={isLoading || isGoogleLoading}
+              disabled={isLoading || isGoogleLoading || isEmailLinkSending}
               className="w-full py-2.5 bg-[#F4C430] hover:bg-[#e0b224] text-[#1F1F1F] text-xs font-bold transition-colors cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50 mt-2"
             >
               {isLoading ? (
@@ -307,6 +418,18 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                 </>
               )}
             </button>
+
+            {mode === 'signin' && (
+              <button
+                type="button"
+                onClick={() => void handleSendEmailSignInLink()}
+                disabled={isLoading || isGoogleLoading || isEmailLinkSending}
+                className="w-full py-2.5 border border-[#E5E5E5] bg-white hover:bg-slate-50 text-[#1F1F1F] text-xs font-semibold transition-colors cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                <Mail className="w-3.5 h-3.5" />
+                {isEmailLinkSending ? 'Sending sign-in link...' : 'Email me a sign-in link'}
+              </button>
+            )}
           </form>
 
           {/* Toggle between Sign Up and Sign In */}
@@ -341,6 +464,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               </p>
             )}
           </div>
+          </>
+          )}
 
           {/* Security & Authenticity Footnote */}
           <div className="flex items-center justify-center gap-1.5 text-[11px] text-[#82877D]">
